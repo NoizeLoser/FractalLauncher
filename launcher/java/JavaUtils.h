@@ -20,7 +20,7 @@
 #include "java/JavaInstall.h"
 
 #ifdef Q_OS_WIN
-#include <cstdint>
+#include <windows.h>
 #endif
 
 QString stripVariableEntries(QString name, QString target, QString remove);
@@ -38,7 +38,7 @@ class JavaUtils : public QObject {
     JavaInstallPtr GetDefaultJava();
 
 #ifdef Q_OS_WIN
-    QList<JavaInstallPtr> FindJavaFromRegistryKey(std::uint32_t keyType, QString keyName, QString keyJavaDir, QString subkeySuffix = "");
+    QList<JavaInstallPtr> FindJavaFromRegistryKey(DWORD keyType, QString keyName, QString keyJavaDir, QString subkeySuffix = "");
 #endif
 
     static QString getJavaCheckPath();

@@ -19,8 +19,6 @@
 
 #include <QByteArray>
 #include <QFileDevice>
-
-#include "Result.h"
 #include "archive/ArchiveReader.h"
 
 struct archive;
@@ -31,12 +29,12 @@ class ArchiveWriter {
     ArchiveWriter(const QString& archiveName);
     virtual ~ArchiveWriter();
 
-    Result<> open();
-    Result<> close();
+    bool open();
+    bool close();
 
-    Result<> addFile(const QString& fileName, const QString& fileDest);
-    Result<> addFile(const QString& fileDest, const QByteArray& data);
-    Result<> addFile(ArchiveReader::File* f);
+    bool addFile(const QString& fileName, const QString& fileDest);
+    bool addFile(const QString& fileDest, const QByteArray& data);
+    bool addFile(ArchiveReader::File* f);
 
     static std::unique_ptr<archive, void (*)(archive*)> createDiskWriter();
 

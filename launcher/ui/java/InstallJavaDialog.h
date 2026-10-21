@@ -19,6 +19,7 @@
 #pragma once
 
 #include <QDialog>
+#include "BaseInstance.h"
 #include "ui/pages/BasePageProvider.h"
 
 class MinecraftInstance;
@@ -31,7 +32,7 @@ class InstallDialog final : public QDialog, private BasePageProvider {
     Q_OBJECT
 
    public:
-    explicit InstallDialog(const QString& uid = QString(), MinecraftInstance* instance = nullptr, QWidget* parent = nullptr);
+    explicit InstallDialog(const QString& uid = QString(), BaseInstance* instance = nullptr, QWidget* parent = nullptr);
 
     QList<BasePage*> getPages() override;
     QString dialogTitle() override;
@@ -40,7 +41,7 @@ class InstallDialog final : public QDialog, private BasePageProvider {
     void done(int result) override;
 
    private:
-    PageContainer* m_container;
-    QDialogButtonBox* m_buttons;
+    PageContainer* container;
+    QDialogButtonBox* buttons;
 };
 }  // namespace Java

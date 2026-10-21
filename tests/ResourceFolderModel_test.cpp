@@ -33,9 +33,9 @@
  *      limitations under the License.
  */
 
-#include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QTimer>
 #include "BaseInstance.h"
 
 #include <FileSystem.h>
@@ -43,10 +43,23 @@
 #include <minecraft/mod/ModFolderModel.h>
 #include <minecraft/mod/ResourceFolderModel.h>
 
-#define EXEC_UPDATE_TASK(EXEC, VERIFY)                            \
-    QSignalSpy spy(&model, &ResourceFolderModel::updateFinished); \
-    VERIFY(EXEC);                                                 \
-    QVERIFY2(spy.count() || spy.wait(10000), "Timer has expired. The update never finished.");
+#define EXEC_UPDATE_TASK(EXEC, VERIFY)                                                  \
+    QEventLoop loop;                                                                    \
+                                                                                        \
+    connect(&model, &ResourceFolderModel::updateFinished, &loop, &QEventLoop::quit);    \
+                                                                                        \
+    QTimer expire_timer;                                                                \
+    expire_timer.callOnTimeout(&loop, &QEventLoop::quit);                               \
+    expire_timer.setSingleShot(true);                                                   \
+    expire_timer.start(4000);                                                           \
+                                                                                        \
+    VERIFY(EXEC);                                                                       \
+    loop.exec();                                                                        \
+                                                                                        \
+    QVERIFY2(expire_timer.isActive(), "Timer has expired. The update never finished."); \
+    expire_timer.stop();                                                                \
+                                                                                        \
+    disconnect(&model, nullptr, &loop, nullptr);
 
 class ResourceFolderModelTest : public QObject {
     Q_OBJECT
@@ -72,12 +85,23 @@ class ResourceFolderModelTest : public QObject {
             QString folder = source;
             QTemporaryDir tempDir;
 
+            QEventLoop loop;
+
             ModFolderModel m(tempDir.path(), nullptr, true, true);
-            QSignalSpy spy(&m, &ModFolderModel::updateFinished);
+
+            connect(&m, &ModFolderModel::updateFinished, &loop, &QEventLoop::quit);
+
+            QTimer expire_timer;
+            expire_timer.callOnTimeout(&loop, &QEventLoop::quit);
+            expire_timer.setSingleShot(true);
+            expire_timer.start(4000);
 
             m.installResource(folder);
 
-            QVERIFY2(spy.count() || spy.wait(10000), "Timer has expired. The update never finished.");
+            loop.exec();
+
+            QVERIFY2(expire_timer.isActive(), "Timer has expired. The update never finished.");
+            expire_timer.stop();
 
             verify(tempDir.path());
         }
@@ -86,12 +110,22 @@ class ResourceFolderModelTest : public QObject {
         {
             QString folder = source + '/';
             QTemporaryDir tempDir;
+            QEventLoop loop;
             ModFolderModel m(tempDir.path(), nullptr, true, true);
-            QSignalSpy spy(&m, &ModFolderModel::updateFinished);
+
+            connect(&m, &ModFolderModel::updateFinished, &loop, &QEventLoop::quit);
+
+            QTimer expire_timer;
+            expire_timer.callOnTimeout(&loop, &QEventLoop::quit);
+            expire_timer.setSingleShot(true);
+            expire_timer.start(4000);
 
             m.installResource(folder);
 
-            QVERIFY2(spy.count() || spy.wait(10000), "Timer has expired. The update never finished.");
+            loop.exec();
+
+            QVERIFY2(expire_timer.isActive(), "Timer has expired. The update never finished.");
+            expire_timer.stop();
 
             verify(tempDir.path());
         }
@@ -109,7 +143,7 @@ class ResourceFolderModelTest : public QObject {
         for (auto mod : model.allMods())
             qDebug() << mod->name();
 
-        QCOMPARE(model.size(), 2);
+        QCOMPARE(model.size(), 4);
 
         model.stopWatching();
     }
@@ -183,8 +217,8 @@ class ResourceFolderModelTest : public QObject {
 
         auto& res_1 = model.at(0).type() != ResourceType::FOLDER ? model.at(0) : model.at(1);
         auto& res_2 = model.at(0).type() == ResourceType::FOLDER ? model.at(0) : model.at(1);
-        auto id_1 = res_1.internalId();
-        auto id_2 = res_2.internalId();
+        auto id_1 = res_1.internal_id();
+        auto id_2 = res_2.internal_id();
         bool initial_enabled_res_2 = res_2.enabled();
         bool initial_enabled_res_1 = res_1.enabled();
 
@@ -202,12 +236,12 @@ class ResourceFolderModelTest : public QObject {
         qDebug() << "res_1 got successfully toggled again.";
 
         QVERIFY(res_1.enabled() == initial_enabled_res_1);
-        QVERIFY(res_1.internalId() == id_1);
+        QVERIFY(res_1.internal_id() == id_1);
         qDebug() << "res_1 got back to its initial state.";
 
         QVERIFY(!res_2.enable(initial_enabled_res_2 ? EnableAction::ENABLE : EnableAction::DISABLE));
         QVERIFY(res_2.enabled() == initial_enabled_res_2);
-        QVERIFY(res_2.internalId() == id_2);
+        QVERIFY(res_2.internal_id() == id_2);
     }
 };
 

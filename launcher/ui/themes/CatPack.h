@@ -39,8 +39,6 @@
 #include <QFileInfo>
 #include <QList>
 #include <QString>
-#include <memory>
-#include "Result.h"
 
 class CatPack {
    public:
@@ -84,12 +82,11 @@ class JsonCatPack : public BasicCatPack {
         PartialDate startTime;
         PartialDate endTime;
     };
-    static Result<std::unique_ptr<JsonCatPack>> create(const QFileInfo& manifestInfo);
-    QString path() const override;
+    JsonCatPack(QFileInfo& manifestInfo);
+    virtual QString path() const override;
     QString path(QDate now) const;
 
    private:
-    explicit JsonCatPack(QString id) : BasicCatPack(id) {}
     QString m_default_path;
     QList<Variant> m_variants;
 };

@@ -39,10 +39,13 @@
 #include <QDomDocument>
 
 #include <QDebug>
-#include <utility>
 #include "Application.h"
 
-NewsChecker::NewsChecker(QNetworkAccessManager* network, QString feedUrl) : m_feedUrl(std::move(feedUrl)), m_network(network) {}
+NewsChecker::NewsChecker(QNetworkAccessManager* network, const QString& feedUrl)
+{
+    m_network = network;
+    m_feedUrl = feedUrl;
+}
 
 void NewsChecker::reloadNews()
 {
@@ -57,7 +60,7 @@ void NewsChecker::reloadNews()
     qDebug() << "Reloading news.";
 
     NetJob::Ptr job{ new NetJob("News RSS Feed", m_network) };
-    job->addNetAction(Net::Request::makeCached(m_feedUrl, m_entry));
+    job->addNetAction(Net::Download::makeCached(m_feedUrl, m_entry));
     job->setAskRetry(false);
     connect(job.get(), &NetJob::succeeded, this, &NewsChecker::rssDownloadFinished);
     connect(job.get(), &NetJob::failed, this, &NewsChecker::rssDownloadFailed);
@@ -73,18 +76,18 @@ void NewsChecker::rssDownloadFinished()
     m_newsNetJob.reset();
     QDomDocument doc;
     {
+        // Stuff to store error info in.
+        QString errorMsg = "Unknown error.";
+        int errorLine = -1;
+        int errorCol = -1;
+
         QFile feed(m_entry->getFullPath());
 
         if (feed.open(QFile::ReadOnly | QFile::Text)) {
             QTextStream in(&feed);
             // Parse the XML.
-            auto result = doc.setContent(in.readAll());
-            if (!result) {
-                const QString fullErrorMsg = QString("Error parsing RSS feed XML. %1 at %2:%3.")
-                                                 .arg(result.errorMessage)
-                                                 .arg(result.errorLine)
-                                                 .arg(result.errorColumn);
-                fail(fullErrorMsg);
+            if (!doc.setContent(in.readAll(), false, &errorMsg, &errorLine, &errorCol)) {
+                fail(QString("Error parsing RSS feed XML. %1 at %2:%3.").arg(errorMsg).arg(errorLine).arg(errorCol));
                 return;
             }
         }
@@ -109,7 +112,7 @@ void NewsChecker::rssDownloadFinished()
     succeed();
 }
 
-void NewsChecker::rssDownloadFailed(const QString& reason)
+void NewsChecker::rssDownloadFailed(QString reason)
 {
     // Set an error message and fail.
     fail(tr("Failed to load news RSS feed:\n%1").arg(reason));

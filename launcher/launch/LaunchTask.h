@@ -87,7 +87,7 @@ class LaunchTask : public Task {
     shared_qobject_ptr<LogModel> getLogModel();
 
    public:
-    QStringList substituteVariables(QString& cmd, bool isLaunch = false) const;
+    QString substituteVariables(QString& cmd, bool isLaunch = false) const;
     QString censorPrivateInfo(QString in);
 
    protected: /* methods */
@@ -115,7 +115,7 @@ class LaunchTask : public Task {
     void finalizeSteps(bool successful, const QString& error);
 
    protected:
-    bool parseXmlLogs(const QString& line, MessageLevel level);
+    bool parseXmlLogs(QString const& line, MessageLevel level);
 
    protected: /* data */
     MinecraftInstance* m_instance;

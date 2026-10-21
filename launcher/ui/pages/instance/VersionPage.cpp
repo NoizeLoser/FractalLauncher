@@ -66,7 +66,7 @@
 #include "ui/GuiUtil.h"
 
 #include "DesktopServices.h"
-#include "Result.h"
+#include "Exception.h"
 #include "icons/IconList.h"
 #include "minecraft/PackProfile.h"
 #include "minecraft/auth/AccountList.h"
@@ -121,6 +121,18 @@ void VersionPage::retranslate()
     ui->retranslateUi(this);
 }
 
+void VersionPage::openedImpl()
+{
+    auto const setting_name = QString("WideBarVisibility_%1").arg(id());
+    m_wide_bar_setting = APPLICATION->settings()->getOrRegisterSetting(setting_name);
+
+    ui->toolBar->setVisibilityState(QByteArray::fromBase64(m_wide_bar_setting->get().toString().toUtf8()));
+}
+void VersionPage::closedImpl()
+{
+    m_wide_bar_setting->set(QString::fromUtf8(ui->toolBar->getVisibilityState().toBase64()));
+}
+
 QMenu* VersionPage::createPopupMenu()
 {
     QMenu* filteredMenu = QMainWindow::createPopupMenu();
@@ -150,8 +162,8 @@ VersionPage::VersionPage(MinecraftInstance* inst, QWidget* parent) : QMainWindow
 
     ui->packageView->setModel(m_filterModel);
     ui->packageView->installEventFilter(this);
+    ui->packageView->setSelectionMode(QAbstractItemView::SingleSelection);
     ui->packageView->setContextMenuPolicy(Qt::CustomContextMenu);
-    ui->packageView->header()->setSectionResizeMode(0, QHeaderView::Stretch);
 
     auto smodel = ui->packageView->selectionModel();
     connect(smodel, &QItemSelectionModel::currentChanged, this, &VersionPage::versionCurrent);
@@ -159,7 +171,7 @@ VersionPage::VersionPage(MinecraftInstance* inst, QWidget* parent) : QMainWindow
     connect(m_profile, &PackProfile::minecraftChanged, this, &VersionPage::updateVersionControls);
     updateVersionControls();
     preselect(0);
-    connect(ui->packageView, &QWidget::customContextMenuRequested, this, &VersionPage::showContextMenu);
+    connect(ui->packageView, &ModListView::customContextMenuRequested, this, &VersionPage::showContextMenu);
     connect(ui->packageView, &QAbstractItemView::activated, this, [this](const QModelIndex& index) {
         auto component = m_profile->getComponent(index.row());
         component->setEnabled(!component->isEnabled());
@@ -228,7 +240,7 @@ void VersionPage::updateButtons(int row)
     ui->actionRemove->setEnabled(patch && patch->isRemovable());
     ui->actionMove_down->setEnabled(patch && patch->isMoveable());
     ui->actionMove_up->setEnabled(patch && patch->isMoveable());
-    ui->actionChange_version->setEnabled(patch && patch->isVersionChangeable());
+    ui->actionChange_version->setEnabled(patch && patch->isVersionChangeable(false));
     ui->actionEdit->setEnabled(patch && patch->isCustom());
     ui->actionCustomize->setEnabled(patch && patch->isCustomizable());
     ui->actionRevert->setEnabled(patch && patch->isRevertible());
@@ -236,11 +248,19 @@ void VersionPage::updateButtons(int row)
 
 bool VersionPage::reloadPackProfile()
 {
-    auto result = m_profile->reload(Net::Mode::Online);
-    if (!result) {
-        QMessageBox::critical(this, tr("Error"), result.error());
+    try {
+        auto result = m_profile->reload(Net::Mode::Online);
+        if (!result) {
+            QMessageBox::critical(this, tr("Error"), result.error);
+        }
+        return result;
+    } catch (const Exception& e) {
+        QMessageBox::critical(this, tr("Error"), e.cause());
+        return false;
+    } catch (...) {
+        QMessageBox::critical(this, tr("Error"), tr("Couldn't load the instance profile."));
+        return false;
     }
-    return result.has_value();
 }
 
 void VersionPage::on_actionReload_triggered()
@@ -279,7 +299,7 @@ void VersionPage::on_actionRemove_triggered()
 
 void VersionPage::on_actionAdd_to_Minecraft_jar_triggered()
 {
-    auto list = GuiUtil::browseForFiles("jarmod", tr("Select jar mods"), tr("Minecraft.jar mods") + " (*.zip *.jar)",
+    auto list = GuiUtil::BrowseForFiles("jarmod", tr("Select jar mods"), tr("Minecraft.jar mods") + " (*.zip *.jar)",
                                         APPLICATION->settings()->get("CentralModsDir").toString(), this->parentWidget());
     if (!list.empty()) {
         m_profile->installJarMods(list);
@@ -289,7 +309,7 @@ void VersionPage::on_actionAdd_to_Minecraft_jar_triggered()
 
 void VersionPage::on_actionReplace_Minecraft_jar_triggered()
 {
-    auto jarPath = GuiUtil::browseForFile("jar", tr("Select jar"), tr("Minecraft.jar replacement") + " (*.jar)",
+    auto jarPath = GuiUtil::BrowseForFile("jar", tr("Select jar"), tr("Minecraft.jar replacement") + " (*.jar)",
                                           APPLICATION->settings()->get("CentralModsDir").toString(), this->parentWidget());
     if (!jarPath.isEmpty()) {
         m_profile->installCustomJar(jarPath);
@@ -299,7 +319,7 @@ void VersionPage::on_actionReplace_Minecraft_jar_triggered()
 
 void VersionPage::on_actionImport_Components_triggered()
 {
-    QStringList list = GuiUtil::browseForFiles("component", tr("Select components"), tr("Components") + " (*.json)",
+    QStringList list = GuiUtil::BrowseForFiles("component", tr("Select components"), tr("Components") + " (*.json)",
                                                APPLICATION->settings()->get("CentralModsDir").toString(), this->parentWidget());
 
     if (!list.isEmpty()) {
@@ -314,25 +334,32 @@ void VersionPage::on_actionImport_Components_triggered()
 
 void VersionPage::on_actionAdd_Agents_triggered()
 {
-    QStringList list = GuiUtil::browseForFiles("agent", tr("Select agents"), tr("Java agents") + " (*.jar)",
+    QStringList list = GuiUtil::BrowseForFiles("agent", tr("Select agents"), tr("Java agents") + " (*.jar)",
                                                APPLICATION->settings()->get("CentralModsDir").toString(), this->parentWidget());
 
-    if (!list.isEmpty()) {
+    if (!list.isEmpty())
         m_profile->installAgents(list);
-    }
 
     updateButtons();
 }
 
 void VersionPage::on_actionMove_up_triggered()
 {
-    m_profile->move(currentRow(), PackProfile::MoveUp);
+    try {
+        m_profile->move(currentRow(), PackProfile::MoveUp);
+    } catch (const Exception& e) {
+        QMessageBox::critical(this, tr("Error"), e.cause());
+    }
     updateButtons();
 }
 
 void VersionPage::on_actionMove_down_triggered()
 {
-    m_profile->move(currentRow(), PackProfile::MoveDown);
+    try {
+        m_profile->move(currentRow(), PackProfile::MoveDown);
+    } catch (const Exception& e) {
+        QMessageBox::critical(this, tr("Error"), e.cause());
+    }
     updateButtons();
 }
 
@@ -345,10 +372,10 @@ void VersionPage::on_actionChange_version_triggered()
     auto patch = m_profile->getComponent(versionRow);
     auto name = patch->getName();
     auto list = patch->getVersionList();
+    list->clearExternalRecommends();
     if (!list) {
         return;
     }
-    list->clearExternalRecommends();
     auto uid = list->uid();
 
     // recommend the correct lwjgl version for the current minecraft version
@@ -375,9 +402,8 @@ void VersionPage::on_actionChange_version_triggered()
     if (!currentVersion.isEmpty()) {
         vselect.setCurrentVersion(currentVersion);
     }
-    if ((vselect.exec() == 0) || !vselect.selectedVersion()) {
+    if (!vselect.exec() || !vselect.selectedVersion())
         return;
-    }
 
     qDebug() << "Change" << uid << "to" << vselect.selectedVersion()->descriptor();
     bool important = false;
@@ -387,9 +413,6 @@ void VersionPage::on_actionChange_version_triggered()
             m_inst->settings()->get("OverrideJavaLocation").toBool()) {
             m_inst->settings()->set("OverrideJavaLocation", false);
             m_inst->settings()->set("JavaPath", "");
-        }
-        if (m_inst->settings()->get("UseLatestMinecraftVersion").toBool()) {
-            m_inst->settings()->set("UseLatestMinecraftVersion", false);
         }
     }
     m_profile->setComponentVersion(uid, vselect.selectedVersion()->descriptor(), important);

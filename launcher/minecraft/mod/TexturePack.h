@@ -29,7 +29,11 @@
 class Version;
 
 class TexturePack : public Resource {
+    Q_OBJECT
    public:
+    using Ptr = shared_qobject_ptr<Resource>;
+
+    TexturePack(QObject* parent = nullptr) : Resource(parent) {}
     TexturePack(QFileInfo file_info) : Resource(file_info) {}
 
     /** Gets the description of the texture pack. */

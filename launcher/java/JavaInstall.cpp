@@ -47,16 +47,18 @@ bool JavaInstall::operator>(const JavaInstall& rhs) const
 
 bool JavaInstall::operator<(BaseVersion& a) const
 {
-    if (auto* install = dynamic_cast<JavaInstall*>(&a)) {
-        return operator<(*install);
+    try {
+        return operator<(dynamic_cast<JavaInstall&>(a));
+    } catch (const std::bad_cast&) {
+        return BaseVersion::operator<(a);
     }
-    return BaseVersion::operator<(a);
 }
 
 bool JavaInstall::operator>(BaseVersion& a) const
 {
-    if (auto* install = dynamic_cast<JavaInstall*>(&a)) {
-        return operator>(*install);
+    try {
+        return operator>(dynamic_cast<JavaInstall&>(a));
+    } catch (const std::bad_cast&) {
+        return BaseVersion::operator>(a);
     }
-    return BaseVersion::operator>(a);
 }

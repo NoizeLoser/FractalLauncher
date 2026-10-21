@@ -39,11 +39,12 @@
 #include <QStandardPaths>
 
 #include "Application.h"
+#include "Commandline.h"
 #include "FileSystem.h"
 #include "launch/LaunchTask.h"
 #include "minecraft/MinecraftInstance.h"
 
-#if defined(Q_OS_LINUX) && defined(ENABLE_GAMEMODE)
+#ifdef Q_OS_LINUX
 #include "gamemode_client.h"
 #endif
 
@@ -78,7 +79,7 @@ void LauncherPartLaunch::executeTask()
         return;
     }
 
-    auto* instance = m_parent->instance();
+    auto instance = m_parent->instance();
 
     QString legacyJarPath;
     if (instance->getLauncher() == "legacy" || instance->shouldApplyOnlineFixes()) {
@@ -106,9 +107,8 @@ void LauncherPartLaunch::executeTask()
     auto classPath = instance->getClassPath();
     classPath.prepend(jarPath);
 
-    if (!legacyJarPath.isEmpty()) {
+    if (!legacyJarPath.isEmpty())
         classPath.prepend(legacyJarPath);
-    }
 
     auto natPath = instance->getNativePath();
 #ifdef Q_OS_WIN
@@ -132,7 +132,8 @@ void LauncherPartLaunch::executeTask()
 
     QString wrapperCommandStr = instance->getWrapperCommand().trimmed();
     if (!wrapperCommandStr.isEmpty()) {
-        auto wrapperArgs = m_parent->substituteVariables(wrapperCommandStr);
+        wrapperCommandStr = m_parent->substituteVariables(wrapperCommandStr);
+        auto wrapperArgs = Commandline::splitArgs(wrapperCommandStr);
         auto wrapperCommand = wrapperArgs.takeFirst();
         auto realWrapperCommand = QStandardPaths::findExecutable(wrapperCommand);
         if (realWrapperCommand.isEmpty()) {
@@ -148,11 +149,11 @@ void LauncherPartLaunch::executeTask()
         m_process.start(javaPath, args);
     }
 
-#if defined(Q_OS_LINUX) && defined(ENABLE_GAMEMODE)
+#ifdef Q_OS_LINUX
     if (instance->settings()->get("EnableFeralGamemode").toBool() && APPLICATION->capabilities() & Application::SupportsGameMode) {
         auto pid = m_process.processId();
-        if (pid != 0) {
-            gamemode_request_start_for(static_cast<pid_t>(pid));
+        if (pid) {
+            gamemode_request_start_for(pid);
         }
     }
 #endif
@@ -176,10 +177,9 @@ void LauncherPartLaunch::on_state(LoggedProcess::State state)
             return;
         }
         case LoggedProcess::Finished: {
-            auto* instance = m_parent->instance();
-            if (instance->settings()->get("CloseAfterLaunch").toBool()) {
+            auto instance = m_parent->instance();
+            if (instance->settings()->get("CloseAfterLaunch").toBool())
                 APPLICATION->showMainWindow();
-            }
 
             m_parent->setPid(-1);
             m_parent->instance()->setMinecraftRunning(false);

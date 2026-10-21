@@ -35,6 +35,7 @@
 
 #include "FlameInstanceCreationTask.h"
 
+#include "InstanceTask.h"
 #include "QObjectPtr.h"
 #include "minecraft/mod/tasks/LocalResourceUpdateTask.h"
 #include "modplatform/flame/FileResolvingTask.h"
@@ -54,244 +55,215 @@
 
 #include "settings/INISettingsObject.h"
 
+#include "SysInfo.h"
 #include "tasks/ConcurrentTask.h"
 #include "ui/dialogs/BlockedModsDialog.h"
 #include "ui/dialogs/CustomMessageBox.h"
 
 #include <QDebug>
 #include <QFileInfo>
-#include <utility>
 
 #include "HardwareInfo.h"
 #include "meta/Index.h"
 #include "minecraft/World.h"
 #include "minecraft/mod/tasks/LocalResourceParse.h"
-#include "net/ApiRequest.h"
+#include "net/ApiDownload.h"
 #include "ui/dialogs/UntrustedModsDialog.h"
 #include "ui/pages/modplatform/OptionalModDialog.h"
 
+static const FlameAPI api;
+
 bool FlameCreationTask::abort()
 {
-    if (!canAbort()) {
+    if (!canAbort())
+        return false;
+
+    if (m_processUpdateFileInfoJob)
+        m_processUpdateFileInfoJob->abort();
+    if (m_filesJob)
+        m_filesJob->abort();
+    if (m_modIdResolver)
+        m_modIdResolver->abort();
+
+    return InstanceCreationTask::abort();
+}
+
+bool FlameCreationTask::updateInstance()
+{
+    auto instance_list = APPLICATION->instances();
+
+    // FIXME: How to handle situations when there's more than one install already for a given modpack?
+    BaseInstance* inst;
+    if (auto original_id = originalInstanceID(); !original_id.isEmpty()) {
+        inst = instance_list->getInstanceById(original_id);
+        Q_ASSERT(inst);
+    } else {
+        inst = instance_list->getInstanceByManagedName(originalName());
+
+        if (!inst) {
+            inst = instance_list->getInstanceById(originalName());
+
+            if (!inst)
+                return false;
+        }
+    }
+
+    QString index_path(FS::PathCombine(m_stagingPath, "manifest.json"));
+
+    try {
+        Flame::loadManifest(m_pack, index_path);
+    } catch (const JSONValidationError& e) {
+        setError(tr("Could not understand pack manifest:\n") + e.cause());
         return false;
     }
 
-    if (m_processUpdateFileInfoJob) {
-        m_processUpdateFileInfoJob->abort();
-    }
-    if (m_filesJob) {
-        m_filesJob->abort();
-    }
-    if (m_modIdResolver) {
-        m_modIdResolver->abort();
-    }
-
-    return InstanceTask::abort();
-}
-
-void FlameCreationTask::executeTask()
-{
-    auto* instanceList = APPLICATION->instances();
-
-    // FIXME: How to handle situations when there's more than one install already for a given modpack?
-    BaseInstance* inst = nullptr;
-    if (auto originalId = originalInstanceID(); !originalId.isEmpty()) {
-        inst = instanceList->getInstanceById(originalId);
-        Q_ASSERT(inst);
-    } else {
-        inst = instanceList->getInstanceByManagedName(originalName());
-
-        if (!inst) {
-            inst = instanceList->getInstanceById(originalName());
-
-            if (!inst) {
-                createInstance();
-                return;
-            }
-        }
-    }
-
-    m_rootPath = QFileInfo(inst->gameRoot()).fileName();
-
-    const QString indexPath(FS::PathCombine(m_stagingPath, "manifest.json"));
-
-    if (!Flame::loadManifest(m_pack, indexPath)) {
-        // emitFailed(tr("Could not understand pack manifest:\n") + e.cause());
-        createInstance();  // to keep the backwards compatibility here just create the instance
-        return;
-    }
-
-    auto versionId = inst->getManagedPackVersionName();
-    auto versionStr = !versionId.isEmpty() ? tr(" (version %1)").arg(versionId) : "";
+    auto version_id = inst->getManagedPackVersionName();
+    auto version_str = !version_id.isEmpty() ? tr(" (version %1)").arg(version_id) : "";
 
     if (shouldConfirmUpdate()) {
-        auto shouldUpdate = askIfShouldUpdate(m_parent, versionStr);
-        if (shouldUpdate == ShouldUpdate::SkipUpdating) {
-            createInstance();
-            return;
-        }
-        if (shouldUpdate == ShouldUpdate::Cancel) {
-            emitAborted();
-            return;
+        auto should_update = askIfShouldUpdate(m_parent, version_str);
+        if (should_update == ShouldUpdate::SkipUpdating)
+            return false;
+        if (should_update == ShouldUpdate::Cancel) {
+            m_abort = true;
+            return false;
         }
     }
 
-    const QDir oldInstDir(inst->instanceRoot());
+    QDir old_inst_dir(inst->instanceRoot());
 
-    const QString oldIndexFolder(FS::PathCombine(oldInstDir.absolutePath(), "flame"));
-    const QString oldIndexPath(FS::PathCombine(oldIndexFolder, "manifest.json"));
+    QString old_index_folder(FS::PathCombine(old_inst_dir.absolutePath(), "flame"));
+    QString old_index_path(FS::PathCombine(old_index_folder, "manifest.json"));
 
-    const QFileInfo oldIndexFile(oldIndexPath);
-    auto createInst = [this, inst] {
-        setOverride(true, inst->id());
-        qDebug() << "Will override instance!";
+    QFileInfo old_index_file(old_index_path);
+    if (old_index_file.exists()) {
+        Flame::Manifest old_pack;
+        Flame::loadManifest(old_pack, old_index_path);
 
-        m_oldInstance = inst;
-
-        // We let it go through the createInstance() stage, just with a couple modifications for updating
-        createInstance();
-    };
-
-    auto warnUser = [this, createInst](const QString& title,
-                                       const QString& text) {  // We don't have an old index file, so we may duplicate stuff!
-        auto* dialog = CustomMessageBox::selectable(m_parent, title, text, QMessageBox::Warning, QMessageBox::Ok | QMessageBox::Cancel);
-
-        if (dialog->exec() == QDialog::DialogCode::Rejected) {
-            emitAborted();
-            return;
-        }
-
-        createInst();
-    };
-
-    if (oldIndexFile.exists()) {
-        Flame::Manifest oldPack;
-        auto res = Flame::loadManifest(oldPack, oldIndexPath);
-        if (!res) {
-            qWarning() << "Error while parsing old manifest: " << res.error();
-        }
-
-        auto oldFiles = oldPack.files;
+        auto& old_files = old_pack.files;
 
         auto& files = m_pack.files;
 
         // Remove repeated files, we don't need to download them!
-        auto filesIterator = files.begin();
-        while (filesIterator != files.end()) {
-            const auto& file = filesIterator;
+        auto files_iterator = files.begin();
+        while (files_iterator != files.end()) {
+            auto const& file = files_iterator;
 
-            auto oldFile = oldFiles.find(file.key());
-            if (oldFile != oldFiles.end()) {
+            auto old_file = old_files.find(file.key());
+            if (old_file != old_files.end()) {
                 // We found a match, but is it a different version?
-                if (oldFile->fileId == file->fileId) {
+                if (old_file->fileId == file->fileId) {
                     qDebug() << "Removed file at" << file->targetFolder << "with id" << file->fileId << "from list of downloads";
 
-                    oldFiles.remove(file.key());
-                    filesIterator = files.erase(filesIterator);
+                    old_files.remove(file.key());
+                    files_iterator = files.erase(files_iterator);
 
-                    if (filesIterator != files.begin()) {
-                        filesIterator--;
-                    }
+                    if (files_iterator != files.begin())
+                        files_iterator--;
                 }
             }
 
-            if (filesIterator != files.end()) {
-                filesIterator++;
-            }
+            files_iterator++;
         }
 
-        const QDir oldMinecraftDir(inst->gameRoot());
+        QDir old_minecraft_dir(inst->gameRoot());
 
         // We will remove all the previous overrides, to prevent duplicate files!
         // TODO: Currently 'overrides' will always override the stuff on update. How do we preserve unchanged overrides?
         // FIXME: We may want to do something about disabled mods.
-        auto oldOverrides = Override::readOverrides("overrides", oldIndexFolder);
-        for (const auto& entry : oldOverrides) {
-            scheduleToDelete(m_parent, oldMinecraftDir, entry);
+        auto old_overrides = Override::readOverrides("overrides", old_index_folder);
+        for (const auto& entry : old_overrides) {
+            scheduleToDelete(m_parent, old_minecraft_dir, entry);
         }
 
         // Remove remaining old files (we need to do an API request to know which ids are which files...)
         QStringList fileIds;
 
-        for (auto& file : oldFiles) {
+        for (auto& file : old_files) {
             fileIds.append(QString::number(file.fileId));
         }
 
-        auto [job, rawResponse] = FlameAPI::getFiles(fileIds);
+        auto [job, raw_response] = api.getFiles(fileIds);
 
-        connect(job.get(), &Task::succeeded, this,
-                [this, rawResponse, fileIds, oldInstDir, oldFiles, oldMinecraftDir, createInst]() mutable {
-                    // Parse the API response
-                    auto doc = Json::requireObject(*rawResponse).and_then([fileIds](const auto& v) -> Result<QJsonArray> {
-                        if (fileIds.size() == 1) {
-                            TRY_INTO(const auto& obj, Json::requireObject(v, "data", "data"))
-                            return { { obj } };
-                        }
-                        return Json::requireArray(v, "data");
-                    });
-                    if (!doc) {
-                        qWarning() << "Error while parsing JSON response from Flame files task:" << doc.error();
-                        qWarning() << *rawResponse;
-                        return;
-                    }
+        QEventLoop loop;
 
-                    for (auto entry : doc.value()) {
-                        auto parse = [&entry, &oldFiles] -> Result<> {
-                            TRY_INTO(const auto& entryObj, Json::requireObject(entry))
+        connect(job.get(), &Task::succeeded, this, [this, raw_response, fileIds, old_inst_dir, &old_files, old_minecraft_dir] {
+            // Parse the API response
+            QJsonParseError parse_error{};
+            auto doc = QJsonDocument::fromJson(*raw_response, &parse_error);
+            if (parse_error.error != QJsonParseError::NoError) {
+                qWarning() << "Error while parsing JSON response from Flame files task at" << parse_error.offset
+                           << "reason:" << parse_error.errorString();
+                qWarning() << *raw_response;
+                return;
+            }
 
-                            Flame::File file;
-                            // We don't care about blocked mods, we just need local data to delete the file
-                            TRY_INTO(file.version, FlameMod::loadIndexedPackVersion(entryObj))
-                            TRY_INTO(const auto& id, Json::requireInteger(entryObj, "id"))
-                            oldFiles.insert(id, file);
-                            return {};
-                        };
-                        if (auto res = parse(); !res) {
-                            qCritical() << res.error();
-                            break;
-                        }
-                    }
+            try {
+                QJsonArray entries;
+                if (fileIds.size() == 1)
+                    entries = { Json::requireObject(Json::requireObject(doc), "data") };
+                else
+                    entries = Json::requireArray(Json::requireObject(doc), "data");
 
-                    // Delete the files
-                    for (const auto& file : oldFiles) {
-                        if (file.version.fileName.isEmpty() || file.targetFolder.isEmpty()) {
-                            continue;
-                        }
+                for (auto entry : entries) {
+                    auto entry_obj = Json::requireObject(entry);
 
-                        const QString relativePath(FS::PathCombine(file.targetFolder, file.version.fileName));
-                        scheduleToDelete(m_parent, oldMinecraftDir, relativePath, true);
-                    }
+                    Flame::File file;
+                    // We don't care about blocked mods, we just need local data to delete the file
+                    file.version = FlameMod::loadIndexedPackVersion(entry_obj);
+                    auto id = Json::requireInteger(entry_obj, "id");
+                    old_files.insert(id, file);
+                }
+            } catch (Json::JsonException& e) {
+                qCritical() << e.cause() << e.what();
+            }
 
-                    createInst();
-                });
-        connect(job.get(), &Task::aborted, this, [warnUser] {
-            warnUser(tr("Failed to fetch the old files."),
-                     tr("We couldn't fetch the old files because the task was aborted. This may cause "
-                        "some of the files to be duplicated. Do you want to continue?"));
+            // Delete the files
+            for (auto& file : old_files) {
+                if (file.version.fileName.isEmpty() || file.targetFolder.isEmpty())
+                    continue;
+
+                QString relative_path(FS::PathCombine(file.targetFolder, file.version.fileName));
+                scheduleToDelete(m_parent, old_minecraft_dir, relative_path, true);
+            }
         });
-        connect(job.get(), &Task::failed, this, [warnUser](const QString& reason) {
-            warnUser(tr("Failed to fetch the old files."), tr("We couldn't fetch the old files because: %1. This may cause some of the "
-                                                              "files to be duplicated. Do you want to continue?")
-                                                               .arg(reason));
-        });
+        connect(job.get(), &Task::failed, this, [](QString reason) { qCritical() << "Failed to get files:" << reason; });
+        connect(job.get(), &Task::finished, &loop, &QEventLoop::quit);
 
         m_processUpdateFileInfoJob = job;
         job->start();
-        return;
+
+        loop.exec();
+
+        m_processUpdateFileInfoJob = nullptr;
+    } else {
+        // We don't have an old index file, so we may duplicate stuff!
+        auto dialog = CustomMessageBox::selectable(m_parent, tr("No index file."),
+                                                   tr("We couldn't find a suitable index file for the older version. This may cause some "
+                                                      "of the files to be duplicated. Do you want to continue?"),
+                                                   QMessageBox::Warning, QMessageBox::Ok | QMessageBox::Cancel);
+
+        if (dialog->exec() == QDialog::DialogCode::Rejected) {
+            m_abort = true;
+            return false;
+        }
     }
-    warnUser(tr("No index file."), tr("We couldn't find a suitable index file for the older version. This may cause some of the files to "
-                                      "be duplicated. Do you want to continue?"));
+
+    setOverride(true, inst->id());
+    qDebug() << "Will override instance!";
+
+    m_instance = inst;
+
+    // We let it go through the createInstance() stage, just with a couple modifications for updating
+    return false;
 }
 
-QString FlameCreationTask::getVersionForLoader(const QString& uid,
-                                               const QString& loaderType,
-                                               const QString& loaderVersion,
-                                               const QString& mcVersion)
+QString FlameCreationTask::getVersionForLoader(QString uid, QString loaderType, QString loaderVersion, QString mcVersion)
 {
     if (loaderVersion == "recommended") {
         auto vlist = APPLICATION->metadataIndex()->get(uid);
         if (!vlist) {
-            emitFailed(tr("Failed to get local metadata index for %1").arg(uid));
+            setError(tr("Failed to get local metadata index for %1").arg(uid));
             return {};
         }
 
@@ -299,18 +271,16 @@ QString FlameCreationTask::getVersionForLoader(const QString& uid,
             QEventLoop loadVersionLoop;
             auto task = vlist->getLoadTask();
             connect(task.get(), &Task::finished, &loadVersionLoop, &QEventLoop::quit);
-            if (!task->isRunning()) {
+            if (!task->isRunning())
                 task->start();
-            }
 
             loadVersionLoop.exec();
         }
 
-        for (const auto& version : vlist->versions()) {
+        for (auto version : vlist->versions()) {
             // first recommended build we find, we use.
-            if (!version->isRecommended()) {
+            if (!version->isRecommended())
                 continue;
-            }
             auto reqs = version->requiredSet();
 
             // filter by minecraft version, if the loader depends on a certain version.
@@ -320,14 +290,13 @@ QString FlameCreationTask::getVersionForLoader(const QString& uid,
                 auto iter = std::find_if(reqs.begin(), reqs.end(), [mcVersion](const Meta::Require& req) {
                     return req.uid == "net.minecraft" && req.equalsVersion == mcVersion;
                 });
-                if (iter == reqs.end()) {
+                if (iter == reqs.end())
                     continue;
-                }
             }
             return version->descriptor();
         }
 
-        emitFailed(tr("Failed to find version for %1 loader").arg(loaderType));
+        setError(tr("Failed to find version for %1 loader").arg(loaderType));
         return {};
     }
 
@@ -339,16 +308,6 @@ QString FlameCreationTask::getVersionForLoader(const QString& uid,
     return loaderVersion;
 }
 
-void FlameCreationTask::setManagedPack(BaseInstance* instance)
-{
-    // Don't add managed info to packs without an ID (most likely imported from ZIP)
-    if (!m_managedId.isEmpty()) {
-        instance->setManagedPack("flame", m_managedId, m_pack.name, m_managedVersionId, m_pack.version);
-    } else {
-        instance->setManagedPack("flame", "", name(), "", "");
-    }
-}
-
 bool FlameCreationTask::promptForUntrustedMods()
 {
     if (m_trustedSource) {
@@ -357,13 +316,12 @@ bool FlameCreationTask::promptForUntrustedMods()
 
     QStringList untrustedMods;
 
-    const QDir mcDir{ FS::PathCombine(m_stagingPath, m_rootPath) };
-    const QString modsPath{ FS::PathCombine(m_stagingPath, m_rootPath, "mods") };
+    const QDir mcDir{ FS::PathCombine(m_stagingPath, "minecraft") };
+    const QString modsPath{ FS::PathCombine(m_stagingPath, "minecraft/mods") };
     if (QDir(modsPath).exists()) {
-        for (const auto& entry :
-             QDirListing(modsPath, QDirListing::IteratorFlag::FilesOnly | QDirListing::IteratorFlag::ResolveSymlinks |
-                                       QDirListing::IteratorFlag::FollowDirSymlinks | QDirListing::IteratorFlag::Recursive)) {
-            untrustedMods.append(mcDir.relativeFilePath(entry.absoluteFilePath()));
+        QDirIterator iter{ modsPath, QDir::Files, QDirIterator::Subdirectories | QDirIterator::FollowSymlinks };
+        while (iter.hasNext()) {
+            untrustedMods.append(mcDir.relativeFilePath(iter.next()));
         }
     }
 
@@ -375,40 +333,43 @@ bool FlameCreationTask::promptForUntrustedMods()
     return dialog.exec() == QDialog::Accepted;
 }
 
-void FlameCreationTask::createInstance()
+std::unique_ptr<MinecraftInstance> FlameCreationTask::createInstance()
 {
-    const QString parentFolder(FS::PathCombine(m_stagingPath, "flame"));
+    QEventLoop loop;
 
-    const QString indexPath(FS::PathCombine(m_stagingPath, "manifest.json"));
-    if (!m_pack.isLoaded) {
-        auto res = Flame::loadManifest(m_pack, indexPath);
-        if (!res) {
-            emitFailed(tr("Could not understand pack manifest:\n") + res.error());
-            return;
-        }
+    QString parent_folder(FS::PathCombine(m_stagingPath, "flame"));
+
+    try {
+        QString index_path(FS::PathCombine(m_stagingPath, "manifest.json"));
+        if (!m_pack.is_loaded)
+            Flame::loadManifest(m_pack, index_path);
+
+        // Keep index file in case we need it some other time (like when changing versions)
+        QString new_index_place(FS::PathCombine(parent_folder, "manifest.json"));
+        FS::ensureFilePathExists(new_index_place);
+        FS::move(index_path, new_index_place);
+
+    } catch (const JSONValidationError& e) {
+        setError(tr("Could not understand pack manifest:\n") + e.cause());
+        return nullptr;
     }
-
-    // Keep index file in case we need it some other time (like when changing versions)
-    const QString newIndexPlace(FS::PathCombine(parentFolder, "manifest.json"));
-    FS::ensureFilePathExists(newIndexPlace);
-    FS::move(indexPath, newIndexPlace);
 
     if (!m_pack.overrides.isEmpty()) {
         const auto overridePath = FS::PathCombine(m_stagingPath, m_pack.overrides);
         if (!QUrl::fromLocalFile(m_stagingPath).isParentOf(QUrl::fromLocalFile(overridePath))) {
             // This means we somehow got out of the root folder, so abort here to prevent exploits
-            emitFailed(tr("The overrides has a path that leads to an arbitrary location (%1). This is a security risk and isn't allowed.")
-                           .arg(m_pack.overrides));
-            return;
+            setError(tr("The overrides has a path that leads to an arbitrary location (%1). This is a security risk and isn't allowed.")
+                         .arg(m_pack.overrides));
+            return nullptr;
         }
         if (QFile::exists(overridePath)) {
             // Create a list of overrides in "overrides.txt" inside flame/
-            Override::createOverrides("overrides", parentFolder, overridePath);
+            Override::createOverrides("overrides", parent_folder, overridePath);
 
-            QString mcPath = FS::PathCombine(m_stagingPath, m_rootPath);
+            QString mcPath = FS::PathCombine(m_stagingPath, "minecraft");
             if (!FS::move(overridePath, mcPath)) {
-                emitFailed(tr("Could not rename the overrides folder:\n") + m_pack.overrides);
-                return;
+                setError(tr("Could not rename the overrides folder:\n") + m_pack.overrides);
+                return nullptr;
             }
         } else {
             logWarning(
@@ -417,8 +378,9 @@ void FlameCreationTask::createInstance()
     }
 
     if (!promptForUntrustedMods()) {
+        m_abort = true;
         emitAborted();
-        return;
+        return nullptr;
     }
 
     QString loaderType;
@@ -429,9 +391,8 @@ void FlameCreationTask::createInstance()
         auto id = loader.id;
         if (id.startsWith("neoforge-")) {
             id.remove("neoforge-");
-            if (id.startsWith("1.20.1-")) {
+            if (id.startsWith("1.20.1-"))
                 id.remove("1.20.1-");  // this is a mess for curseforge
-            }
             loaderType = "neoforge";
             loaderUid = "net.neoforged";
         } else if (id.startsWith("forge-")) {
@@ -455,7 +416,7 @@ void FlameCreationTask::createInstance()
 
     QString configPath = FS::PathCombine(m_stagingPath, "instance.cfg");
     auto instanceSettings = std::make_unique<INISettingsObject>(configPath);
-    m_newInstance = std::make_unique<MinecraftInstance>(m_globalSettings, std::move(instanceSettings), m_stagingPath);
+    auto instance = std::make_unique<MinecraftInstance>(m_globalSettings, std::move(instanceSettings), m_stagingPath);
     auto mcVersion = m_pack.minecraft.version;
 
     // Hack to correct some 'special sauce'...
@@ -465,48 +426,47 @@ void FlameCreationTask::createInstance()
         logWarning(tr("Mysterious trailing dots removed from Minecraft version while importing pack."));
     }
 
-    auto* components = m_newInstance->getPackProfile();
+    auto components = instance->getPackProfile();
     components->buildingFromScratch();
     components->setComponentVersion("net.minecraft", mcVersion, true);
     if (!loaderType.isEmpty()) {
         auto version = getVersionForLoader(loaderUid, loaderType, loaderVersion, mcVersion);
-        if (version.isEmpty()) {  // because there are more info in getVersionForLoader the emitFailed is trigered inside it
-            return;
-        }
+        if (version.isEmpty())
+            return nullptr;
         components->setComponentVersion(loaderUid, version);
     }
 
     if (m_instIcon != "default") {
-        m_newInstance->setIconKey(m_instIcon);
+        instance->setIconKey(m_instIcon);
     } else {
         if (m_pack.name.contains("Direwolf20")) {
-            m_newInstance->setIconKey("steve");
+            instance->setIconKey("steve");
         } else if (m_pack.name.contains("FTB") || m_pack.name.contains("Feed The Beast")) {
-            m_newInstance->setIconKey("ftb_logo");
+            instance->setIconKey("ftb_logo");
         } else {
-            m_newInstance->setIconKey("flame");
+            instance->setIconKey("flame");
         }
     }
 
     int recommendedRAM = m_pack.minecraft.recommendedRAM;
 
     // only set memory if this is a fresh instance
-    if (!m_oldInstance && recommendedRAM > 0) {
-        const auto sysMiB = HardwareInfo::totalRamMiB();
-        const auto max = static_cast<double>(sysMiB) * 0.9;
+    if (!m_instance && recommendedRAM > 0) {
+        const uint64_t sysMiB = HardwareInfo::totalRamMiB();
+        const uint64_t max = sysMiB * 0.9;
 
-        if (static_cast<double>(recommendedRAM) > max) {
+        if (static_cast<uint64_t>(recommendedRAM) > max) {
             logWarning(tr("The recommended memory of the modpack exceeds 90% of your system RAM—reducing it from %1 MiB to %2 MiB!")
                            .arg(recommendedRAM)
                            .arg(max));
-            recommendedRAM = static_cast<int>(max);
+            recommendedRAM = max;
         }
 
-        m_newInstance->settings()->set("OverrideMemory", true);
-        m_newInstance->settings()->set("MaxMemAlloc", recommendedRAM);
+        instance->settings()->set("OverrideMemory", true);
+        instance->settings()->set("MaxMemAlloc", recommendedRAM);
     }
 
-    QString jarmodsPath = FS::PathCombine(m_stagingPath, m_rootPath, "jarmods");
+    QString jarmodsPath = FS::PathCombine(m_stagingPath, "minecraft", "jarmods");
     QFileInfo jarmodsInfo(jarmodsPath);
     if (jarmodsInfo.isDir()) {
         // install all the jar mods
@@ -517,31 +477,53 @@ void FlameCreationTask::createInstance()
             qDebug() << info.fileName();
             jarMods.push_back(info.absoluteFilePath());
         }
-        auto* profile = m_newInstance->getPackProfile();
+        auto profile = instance->getPackProfile();
         profile->installJarMods(jarMods);
         // nuke the original files
         FS::deletePath(jarmodsPath);
     }
 
-    setManagedPack(m_newInstance.get());
+    // Don't add managed info to packs without an ID (most likely imported from ZIP)
+    if (!m_managedId.isEmpty())
+        instance->setManagedPack("flame", m_managedId, m_pack.name, m_managedVersionId, m_pack.version);
+    else
+        instance->setManagedPack("flame", "", name(), "", "");
 
-    m_newInstance->setName(name());
+    instance->setName(name());
 
     m_modIdResolver.reset(new Flame::FileResolvingTask(m_pack));
-    connect(m_modIdResolver.get(), &Flame::FileResolvingTask::succeeded, this, &FlameCreationTask::idResolverSucceeded);
-    connect(m_modIdResolver.get(), &Flame::FileResolvingTask::failed, this, [this](const QString& reason) {
+    connect(m_modIdResolver.get(), &Flame::FileResolvingTask::succeeded, this, [this, &loop] { idResolverSucceeded(loop); });
+    connect(m_modIdResolver.get(), &Flame::FileResolvingTask::failed, [this, &loop](QString reason) {
         m_modIdResolver.reset();
-        emitFailed(tr("Unable to resolve mod IDs:\n") + reason);
+        setError(tr("Unable to resolve mod IDs:\n") + reason);
+        loop.quit();
     });
-    connect(m_modIdResolver.get(), &Flame::FileResolvingTask::aborted, this, &FlameCreationTask::emitAborted);
+    connect(m_modIdResolver.get(), &Flame::FileResolvingTask::aborted, &loop, &QEventLoop::quit);
     connect(m_modIdResolver.get(), &Flame::FileResolvingTask::progress, this, &FlameCreationTask::setProgress);
     connect(m_modIdResolver.get(), &Flame::FileResolvingTask::status, this, &FlameCreationTask::setStatus);
     connect(m_modIdResolver.get(), &Flame::FileResolvingTask::stepProgress, this, &FlameCreationTask::propagateStepProgress);
     connect(m_modIdResolver.get(), &Flame::FileResolvingTask::details, this, &FlameCreationTask::setDetails);
     m_modIdResolver->start();
+
+    loop.exec();
+
+    bool did_succeed = getError().isEmpty();
+
+    // Update information of the already installed instance, if any.
+    if (m_instance && did_succeed) {
+        setAbortable(false);
+        auto inst = m_instance.value();
+
+        inst->copyManagedPack(*instance);
+    }
+
+    if (did_succeed) {
+        return instance;
+    }
+    return nullptr;
 }
 
-void FlameCreationTask::idResolverSucceeded()
+void FlameCreationTask::idResolverSucceeded(QEventLoop& loop)
 {
     auto results = m_modIdResolver->getResults().files;
 
@@ -556,6 +538,7 @@ void FlameCreationTask::idResolverSucceeded()
         OptionalModDialog optionalModDialog(m_parent, optionalFiles);
         if (optionalModDialog.exec() == QDialog::Rejected) {
             emitAborted();
+            loop.quit();
             return;
         }
 
@@ -563,28 +546,28 @@ void FlameCreationTask::idResolverSucceeded()
     }
 
     // first check for blocked mods
-    QList<BlockedMod> blockedMods;
+    QList<BlockedMod> blocked_mods;
     auto anyBlocked = false;
     for (const auto& result : results.values()) {
-        if (result.pack.resourceType != ModPlatform::ResourceType::Mod) {
+        if (result.resourceType != ModPlatform::ResourceType::Mod) {
             m_otherResources.append(std::make_pair(result.version.fileName, result.targetFolder));
         }
 
         // skip optional mods that were not selected
         if (result.version.downloadUrl.isEmpty()) {
-            BlockedMod blockedMod;
-            blockedMod.name = result.version.fileName;
-            blockedMod.websiteUrl = QString("%1/download/%2").arg(result.pack.websiteUrl, QString::number(result.fileId));
-            blockedMod.hash = result.version.hash;
-            blockedMod.matched = false;
-            blockedMod.localPath = "";
-            blockedMod.targetFolder = result.targetFolder;
+            BlockedMod blocked_mod;
+            blocked_mod.name = result.version.fileName;
+            blocked_mod.websiteUrl = QString("%1/download/%2").arg(result.pack.websiteUrl, QString::number(result.fileId));
+            blocked_mod.hash = result.version.hash;
+            blocked_mod.matched = false;
+            blocked_mod.localPath = "";
+            blocked_mod.targetFolder = result.targetFolder;
             auto fileName = result.version.fileName;
             fileName = FS::RemoveInvalidPathChars(fileName);
             auto relpath = FS::PathCombine(result.targetFolder, fileName);
-            blockedMod.disabled = !result.required && !m_selectedOptionalMods.contains(relpath);
+            blocked_mod.disabled = !result.required && !m_selectedOptionalMods.contains(relpath);
 
-            blockedMods.append(blockedMod);
+            blocked_mods.append(blocked_mod);
 
             anyBlocked = true;
         }
@@ -592,28 +575,28 @@ void FlameCreationTask::idResolverSucceeded()
     if (anyBlocked) {
         qWarning() << "Blocked mods found, displaying mod list";
 
-        BlockedModsDialog messageDialog(m_parent, tr("Blocked mods found"),
-                                        tr("The following files are not available for download in third party launchers.<br/>"
-                                           "You will need to manually download them and add them to the instance."),
-                                        blockedMods);
+        BlockedModsDialog message_dialog(m_parent, tr("Blocked mods found"),
+                                         tr("The following files are not available for download in third party launchers.<br/>"
+                                            "You will need to manually download them and add them to the instance."),
+                                         blocked_mods);
 
-        messageDialog.setModal(true);
+        message_dialog.setModal(true);
 
-        if (messageDialog.exec() != 0) {
-            qDebug() << "Post dialog blocked mods list:" << blockedMods;
-            copyBlockedMods(blockedMods);
-            setupDownloadJob();
+        if (message_dialog.exec()) {
+            qDebug() << "Post dialog blocked mods list:" << blocked_mods;
+            copyBlockedMods(blocked_mods);
+            setupDownloadJob(loop);
         } else {
             m_modIdResolver.reset();
-            emitAborted();
-            return;
+            setError("Canceled");
+            loop.quit();
         }
     } else {
-        setupDownloadJob();
+        setupDownloadJob(loop);
     }
 }
 
-void FlameCreationTask::setupDownloadJob()
+void FlameCreationTask::setupDownloadJob(QEventLoop& loop)
 {
     m_filesJob.reset(new NetJob(tr("Mod Download Flame"), APPLICATION->network()));
     auto results = m_modIdResolver->getResults().files;
@@ -627,29 +610,23 @@ void FlameCreationTask::setupDownloadJob()
             relpath += ".disabled";
         }
 
-        relpath = FS::PathCombine(m_rootPath, relpath);
-        auto path = FS::getSafePathInRoot(m_stagingPath, relpath);
-        if (!path) {
-            emitFailed(tr("The modpack is trying to download a file outside of the instance folder (%1). This is a security risk and isn't "
-                          "allowed.")
-                           .arg(relpath));
-            return;
-        }
+        relpath = FS::PathCombine("minecraft", relpath);
+        auto path = FS::PathCombine(m_stagingPath, relpath);
 
         if (!result.version.downloadUrl.isEmpty()) {
-            qDebug() << "Will download" << result.version.downloadUrl << "to" << *path;
-            auto dl = Net::ApiRequest::makeFile(result.version.downloadUrl, *path);
+            qDebug() << "Will download" << result.version.downloadUrl << "to" << path;
+            auto dl = Net::ApiDownload::makeFile(result.version.downloadUrl, path);
             m_filesJob->addNetAction(dl);
         }
     }
 
-    connect(m_filesJob.get(), &NetJob::finished, this, [this]() {
+    connect(m_filesJob.get(), &NetJob::finished, this, [this, &loop]() {
         m_filesJob.reset();
-        validateOtherResources();
+        validateOtherResources(loop);
     });
-    connect(m_filesJob.get(), &NetJob::failed, this, [this](QString reason) {
+    connect(m_filesJob.get(), &NetJob::failed, [this](QString reason) {
         m_filesJob.reset();
-        emitFailed(std::move(reason));
+        setError(reason);
     });
     connect(m_filesJob.get(), &NetJob::progress, this, [this](qint64 current, qint64 total) {
         setDetails(tr("%1 out of %2 complete").arg(current).arg(total));
@@ -662,24 +639,23 @@ void FlameCreationTask::setupDownloadJob()
 }
 
 /// @brief copy the matched blocked mods to the instance staging area
-/// @param blockedMods list of the blocked mods and their matched paths
-void FlameCreationTask::copyBlockedMods(const QList<BlockedMod>& blockedMods)
+/// @param blocked_mods list of the blocked mods and their matched paths
+void FlameCreationTask::copyBlockedMods(QList<BlockedMod> const& blocked_mods)
 {
     setStatus(tr("Copying Blocked Mods..."));
     setAbortable(false);
     int i = 0;
-    const auto total = blockedMods.length();
-    setProgress(i, static_cast<int>(total));
-    for (const auto& mod : blockedMods) {
+    int total = blocked_mods.length();
+    setProgress(i, total);
+    for (auto const& mod : blocked_mods) {
         if (!mod.matched) {
             qDebug() << mod.name << "was not matched to a local file, skipping copy";
             continue;
         }
 
-        auto destPath = FS::PathCombine(m_stagingPath, m_rootPath, mod.targetFolder, mod.name);
-        if (mod.disabled) {
+        auto destPath = FS::PathCombine(m_stagingPath, "minecraft", mod.targetFolder, mod.name);
+        if (mod.disabled)
             destPath += ".disabled";
-        }
 
         setStatus(tr("Copying Blocked Mods (%1 out of %2 are done)").arg(QString::number(i), QString::number(total)));
 
@@ -702,20 +678,20 @@ void FlameCreationTask::copyBlockedMods(const QList<BlockedMod>& blockedMods)
     setAbortable(true);
 }
 
-void FlameCreationTask::validateOtherResources()
+void FlameCreationTask::validateOtherResources(QEventLoop& loop)
 {
     qDebug() << "Validating whether other resources are in the right place";
     QStringList zipMods;
-    for (const auto& [fileName, targetFolder] : m_otherResources) {
+    for (auto [fileName, targetFolder] : m_otherResources) {
         qDebug() << "Checking" << fileName << "...";
-        auto localPath = FS::PathCombine(m_stagingPath, m_rootPath, targetFolder, fileName);
+        auto localPath = FS::PathCombine(m_stagingPath, "minecraft", targetFolder, fileName);
 
         /// @brief check the target and move the the file
         /// @return path where file can now be found
-        auto validatePath = [&localPath, this](const QString& fileName, const QString& targetFolder, const QString& realTarget) {
+        auto validatePath = [&localPath, this](QString fileName, QString targetFolder, QString realTarget) {
             if (targetFolder != realTarget) {
                 qDebug() << "Target folder of" << fileName << "is incorrect, it belongs in" << realTarget;
-                auto destPath = FS::PathCombine(m_stagingPath, m_rootPath, realTarget, fileName);
+                auto destPath = FS::PathCombine(m_stagingPath, "minecraft", realTarget, fileName);
                 qDebug() << "Moving" << localPath << "to" << destPath;
                 if (FS::move(localPath, destPath)) {
                     return destPath;
@@ -726,14 +702,14 @@ void FlameCreationTask::validateOtherResources()
             return localPath;
         };
 
-        auto installWorld = [this](const QString& worldPath) {
+        auto installWorld = [this](QString worldPath) {
             qDebug() << "Installing World from" << worldPath;
             QFileInfo worldFileInfo(worldPath);
             World w(worldFileInfo);
             if (!w.isValid()) {
                 qDebug() << "World at" << worldPath << "is not valid, skipping install.";
             } else {
-                w.install(FS::PathCombine(m_stagingPath, m_rootPath, "saves"));
+                w.install(FS::PathCombine(m_stagingPath, "minecraft", "saves"));
             }
         };
 
@@ -775,50 +751,14 @@ void FlameCreationTask::validateOtherResources()
     // TODO make this work with other sorts of resource
     auto task = makeShared<ConcurrentTask>("CreateModMetadata", APPLICATION->settings()->get("NumberOfConcurrentTasks").toInt());
     auto results = m_modIdResolver->getResults().files;
-    auto folder = FS::PathCombine(m_stagingPath, m_rootPath, "mods", ".index");
-    for (const auto& file : results) {
+    auto folder = FS::PathCombine(m_stagingPath, "minecraft", "mods", ".index");
+    for (auto file : results) {
         if (file.targetFolder != "mods" || (file.version.fileName.endsWith(".zip") && !zipMods.contains(file.version.fileName))) {
             continue;
         }
-        task->addTask(makeShared<LocalResourceUpdateTask>(folder, file.pack, file.version, true));
+        task->addTask(makeShared<LocalResourceUpdateTask>(folder, file.pack, file.version));
     }
-    connect(task.get(), &Task::finished, this, &FlameCreationTask::finishInstall);
+    connect(task.get(), &Task::finished, &loop, &QEventLoop::quit);
     m_processUpdateFileInfoJob = task;
     task->start();
-}
-
-void FlameCreationTask::finishInstall()
-{
-    // Update information of the already installed instance, if any.
-    if (m_oldInstance) {
-        setAbortable(false);
-        setManagedPack(m_oldInstance.value_or(nullptr));
-    }
-
-    if (shouldOverride()) {
-        bool deleteFailed = false;
-
-        setAbortable(false);
-        setStatus(tr("Removing old conflicting files..."));
-        qDebug() << "Removing old files";
-
-        for (const QString& path : m_filesToRemove) {
-            if (!QFile::exists(path)) {
-                continue;
-            }
-
-            qDebug() << "Removing" << path;
-
-            if (!QFile::remove(path)) {
-                qCritical() << "Could not remove" << path;
-                deleteFailed = true;
-            }
-        }
-
-        if (deleteFailed) {
-            emitFailed(tr("Failed to remove old conflicting files."));
-            return;
-        }
-    }
-    downloadFiles(m_newInstance.get());
 }

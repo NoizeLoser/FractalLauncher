@@ -42,8 +42,6 @@
 #include <QUrl>
 #include <QVector>
 
-#include "Result.h"
-
 namespace FTB {
 
 struct Specs {
@@ -151,9 +149,9 @@ struct VersionChangelog {
     int64_t updated;
 };
 
-Result<> loadModpack(Modpack& m, const QJsonObject& obj);
+void loadModpack(Modpack& m, QJsonObject& obj);
 
-Result<> loadVersion(Version& m, const QJsonObject& obj);
+void loadVersion(Version& m, QJsonObject& obj);
 }  // namespace FTB
 
 Q_DECLARE_METATYPE(FTB::Modpack)

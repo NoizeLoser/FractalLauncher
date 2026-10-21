@@ -32,14 +32,14 @@ class ExportToModListDialog : public QDialog {
 
    public:
     explicit ExportToModListDialog(QString name, QList<Mod*> mods, QWidget* parent = nullptr);
-    ~ExportToModListDialog() override;
+    ~ExportToModListDialog();
 
     void done(int result) override;
 
    protected slots:
     void formatChanged(int index);
     void triggerImp();
-    void trigger(int /*unused*/) { triggerImp(); };
+    void trigger(int) { triggerImp(); };
     void addExtra(ExportToModList::OptionalData option);
 
    private:
@@ -47,9 +47,9 @@ class ExportToModListDialog : public QDialog {
     void enableCustom(bool enabled);
 
     QList<Mod*> m_mods;
-    bool m_templateChanged;
+    bool m_template_changed;
     QString m_name;
     ExportToModList::Formats m_format = ExportToModList::Formats::HTML;
-    Ui::ExportToModListDialog* m_ui;
+    Ui::ExportToModListDialog* ui;
     static const QHash<ExportToModList::Formats, QString> exampleLines;
 };

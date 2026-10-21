@@ -24,7 +24,6 @@
 #include <memory>
 
 #include "BaseVersion.h"
-#include "Result.h"
 #include "java/JavaVersion.h"
 
 namespace Java {
@@ -60,6 +59,6 @@ using MetadataPtr = std::shared_ptr<Metadata>;
 
 DownloadType parseDownloadType(QString javaDownload);
 QString downloadTypeToString(DownloadType javaDownload);
-Result<MetadataPtr> parseJavaMeta(const QJsonObject& in);
+MetadataPtr parseJavaMeta(const QJsonObject& libObj);
 
 }  // namespace Java

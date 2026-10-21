@@ -46,37 +46,37 @@ namespace Net {
 /** Maximum time to hold a cache entry
  *  = 1 week in seconds
  */
-#define MAX_TIME_TO_EXPIRE (1 * 7 * 24 * 60 * 60)
+#define MAX_TIME_TO_EXPIRE 1 * 7 * 24 * 60 * 60
 
-MetaCacheSink::MetaCacheSink(MetaEntryPtr entry, ChecksumValidator* md5sum, bool isEternal)
-    : Net::FileSink(entry->getFullPath()), m_entry(entry), m_md5Node(md5sum), m_isEternal(isEternal)
+MetaCacheSink::MetaCacheSink(MetaEntryPtr entry, ChecksumValidator* md5sum, bool is_eternal)
+    : Net::FileSink(entry->getFullPath()), m_entry(entry), m_md5Node(md5sum), m_is_eternal(is_eternal)
 {
     addValidator(md5sum);
 }
 
-auto MetaCacheSink::initCache(QNetworkRequest& request) -> InitResult
+Task::State MetaCacheSink::initCache(QNetworkRequest& request)
 {
     if (!m_entry->isStale()) {
-        return InitType::CacheHit;
+        return Task::State::Succeeded;
     }
 
     // check if file exists, if it does, use its information for the request
     QFile current(m_filename);
     if (current.exists() && current.size() != 0) {
-        if (!m_entry->getRemoteChangedTimestamp().isEmpty()) {
+        if (m_entry->getRemoteChangedTimestamp().size()) {
             request.setRawHeader(QString("If-Modified-Since").toLatin1(), m_entry->getRemoteChangedTimestamp().toLatin1());
         }
-        if (!m_entry->getETag().isEmpty()) {
+        if (m_entry->getETag().size()) {
             request.setRawHeader(QString("If-None-Match").toLatin1(), m_entry->getETag().toLatin1());
         }
     }
 
-    return InitType::Ok;
+    return Task::State::Running;
 }
 
-auto MetaCacheSink::finalizeCache(QNetworkReply& reply) -> Result<>
+Task::State MetaCacheSink::finalizeCache(QNetworkReply& reply)
 {
-    QFileInfo outputFileInfo(m_filename);
+    QFileInfo output_file_info(m_filename);
 
     if (m_wroteAnyData) {
         m_entry->setMD5Sum(m_md5Node->hash().toHex().constData());
@@ -88,36 +88,36 @@ auto MetaCacheSink::finalizeCache(QNetworkReply& reply) -> Result<>
         m_entry->setRemoteChangedTimestamp(reply.rawHeader("Last-Modified").constData());
     }
 
-    m_entry->setLocalChangedTimestamp(outputFileInfo.lastModified().toUTC().toMSecsSinceEpoch());
+    m_entry->setLocalChangedTimestamp(output_file_info.lastModified().toUTC().toMSecsSinceEpoch());
 
     {  // Cache lifetime
-        if (m_isEternal) {
+        if (m_is_eternal) {
             qCDebug(taskMetaCacheLogC) << "Adding eternal cache entry:" << m_entry->getFullPath();
             m_entry->makeEternal(true);
         } else if (reply.hasRawHeader("Cache-Control")) {
-            auto cacheControlHeader = reply.rawHeader("Cache-Control");
-            qCDebug(taskMetaCacheLogC) << "Parsing 'Cache-Control' header with" << cacheControlHeader;
+            auto cache_control_header = reply.rawHeader("Cache-Control");
+            qCDebug(taskMetaCacheLogC) << "Parsing 'Cache-Control' header with" << cache_control_header;
 
             static const QRegularExpression s_maxAgeExpr("max-age=([0-9]+)");
-            qint64 maxAge = s_maxAgeExpr.match(cacheControlHeader).captured(1).toLongLong();
-            m_entry->setMaximumAge(maxAge);
+            qint64 max_age = s_maxAgeExpr.match(cache_control_header).captured(1).toLongLong();
+            m_entry->setMaximumAge(max_age);
 
         } else if (reply.hasRawHeader("Expires")) {
-            auto expiresHeader = reply.rawHeader("Expires");
-            qCDebug(taskMetaCacheLogC) << "Parsing 'Expires' header with" << expiresHeader;
+            auto expires_header = reply.rawHeader("Expires");
+            qCDebug(taskMetaCacheLogC) << "Parsing 'Expires' header with" << expires_header;
 
-            qint64 maxAge = QDateTime::fromString(expiresHeader).toSecsSinceEpoch() - QDateTime::currentSecsSinceEpoch();
-            m_entry->setMaximumAge(maxAge);
+            qint64 max_age = QDateTime::fromString(expires_header).toSecsSinceEpoch() - QDateTime::currentSecsSinceEpoch();
+            m_entry->setMaximumAge(max_age);
         } else {
             m_entry->setMaximumAge(MAX_TIME_TO_EXPIRE);
         }
 
         if (reply.hasRawHeader("Age")) {
-            auto ageHeader = reply.rawHeader("Age");
-            qCDebug(taskMetaCacheLogC) << "Parsing 'Age' header with" << ageHeader;
+            auto age_header = reply.rawHeader("Age");
+            qCDebug(taskMetaCacheLogC) << "Parsing 'Age' header with" << age_header;
 
-            qint64 currentAge = ageHeader.toLongLong();
-            m_entry->setCurrentAge(currentAge);
+            qint64 current_age = age_header.toLongLong();
+            m_entry->setCurrentAge(current_age);
         } else {
             m_entry->setCurrentAge(0);
         }
@@ -126,7 +126,7 @@ auto MetaCacheSink::finalizeCache(QNetworkReply& reply) -> Result<>
     m_entry->setStale(false);
     APPLICATION->metacache()->updateEntry(m_entry);
 
-    return {};
+    return Task::State::Succeeded;
 }
 
 bool MetaCacheSink::hasLocalData()

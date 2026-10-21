@@ -55,7 +55,7 @@
 #include "minecraft/WorldList.h"
 #include "minecraft/auth/AccountList.h"
 
-CreateShortcutDialog::CreateShortcutDialog(MinecraftInstance* instance, QWidget* parent)
+CreateShortcutDialog::CreateShortcutDialog(BaseInstance* instance, QWidget* parent)
     : QDialog(parent), ui(new Ui::CreateShortcutDialog), m_instance(instance)
 {
     ui->setupUi(this);
@@ -64,8 +64,9 @@ CreateShortcutDialog::CreateShortcutDialog(MinecraftInstance* instance, QWidget*
     ui->iconButton->setIcon(APPLICATION->icons()->getIcon(InstIconKey));
     ui->instNameTextBox->setPlaceholderText(instance->name());
 
-    m_QuickJoinSupported = instance && instance->traits().contains("feature:is_quick_play_singleplayer");
-    auto worldList = instance->worldList();
+    auto mInst = dynamic_cast<MinecraftInstance*>(instance);
+    m_QuickJoinSupported = mInst && mInst->traits().contains("feature:is_quick_play_singleplayer");
+    auto worldList = mInst->worldList();
     worldList->update();
     if (!m_QuickJoinSupported || worldList->empty()) {
         ui->worldTarget->hide();

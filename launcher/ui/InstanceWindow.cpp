@@ -42,7 +42,6 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QScrollBar>
-#include <QTimer>
 
 #include "ui/widgets/PageContainer.h"
 
@@ -50,7 +49,7 @@
 
 #include "icons/IconList.h"
 
-InstanceWindow::InstanceWindow(MinecraftInstance* instance, QWidget* parent) : QMainWindow(parent), m_instance(instance)
+InstanceWindow::InstanceWindow(BaseInstance* instance, QWidget* parent) : QMainWindow(parent), m_instance(instance)
 {
     setAttribute(Qt::WA_DeleteOnClose);
 
@@ -93,14 +92,6 @@ InstanceWindow::InstanceWindow(MinecraftInstance* instance, QWidget* parent) : Q
         m_launchButton->setMinimumWidth(80);  // HACK!!
         horizontalLayout->addWidget(m_launchButton);
         connect(m_launchButton, &QPushButton::clicked, this, [this] { APPLICATION->launch(m_instance); });
-
-        m_restartButton = new QPushButton(this);
-        m_restartButton->setText(tr("&Restart"));
-        m_restartButton->setToolTip(tr("Restart the running instance"));
-        horizontalLayout->addWidget(m_restartButton);
-        connect(m_restartButton, &QPushButton::clicked, this, &InstanceWindow::restartInstance);
-
-        m_restartButton->hide();
 
         m_killButton = new QPushButton(this);
         m_killButton->setText(tr("&Kill"));
@@ -161,14 +152,8 @@ void InstanceWindow::on_instanceStatusChanged(BaseInstance::Status, BaseInstance
 
 void InstanceWindow::updateButtons()
 {
-    const bool running = m_instance->isRunning();
-
-    m_launchButton->setVisible(!running);
-    m_restartButton->setVisible(running);
-
     m_launchButton->setEnabled(m_instance->canLaunch());
-    m_restartButton->setEnabled(running && !m_restartQueued);
-    m_killButton->setEnabled(running);
+    m_killButton->setEnabled(m_instance->isRunning());
 
     QMenu* launchMenu = m_launchButton->menu();
     if (launchMenu)
@@ -190,24 +175,7 @@ void InstanceWindow::runningStateChanged(bool running)
     m_container->refreshContainer();
     if (running) {
         selectPage("log");
-    } else if (m_restartQueued) {
-        m_restartQueued = false;
-        // Wait until the current launch controller has handled the stopped instance before launching again.
-        QTimer::singleShot(0, this, [this] {
-            APPLICATION->launch(m_instance);
-            updateButtons();
-        });
     }
-}
-
-void InstanceWindow::restartInstance()
-{
-    if (!m_instance->isRunning()) {
-        return;
-    }
-
-    m_restartQueued = APPLICATION->kill(m_instance);
-    updateButtons();
 }
 
 void InstanceWindow::closeEvent(QCloseEvent* event)

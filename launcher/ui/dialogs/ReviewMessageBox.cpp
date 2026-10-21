@@ -18,28 +18,6 @@ ReviewMessageBox::ReviewMessageBox(QWidget* parent, [[maybe_unused]] QString con
     ui->modTreeWidget->header()->setStretchLastSection(false);
     ui->modTreeWidget->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
 
-    auto* resourcesItem = ui->modTreeWidget->topLevelItem(0);
-    resourcesItem->setExpanded(true);
-    connect(ui->modTreeWidget, &QTreeWidget::itemCollapsed, this, [resourcesItem](QTreeWidgetItem* item) {
-        if (item != resourcesItem) {
-            return;
-        }
-
-        bool expandChildren = true;
-        for (int i = 0; i < resourcesItem->childCount(); ++i) {
-            if (resourcesItem->child(i)->isExpanded()) {
-                expandChildren = false;
-                break;
-            }
-        }
-
-        // Keep the resource rows visible and apply the root's toggle to their details instead.
-        resourcesItem->setExpanded(true);
-        for (int i = 0; i < resourcesItem->childCount(); ++i) {
-            resourcesItem->child(i)->setExpanded(expandChildren);
-        }
-    });
-
     connect(ui->buttonBox, &QDialogButtonBox::accepted, this, &ReviewMessageBox::accept);
     connect(ui->buttonBox, &QDialogButtonBox::rejected, this, &ReviewMessageBox::reject);
 
@@ -48,7 +26,7 @@ ReviewMessageBox::ReviewMessageBox(QWidget* parent, [[maybe_unused]] QString con
 
     // Overwrite Ctrl+C functionality to exclude the label when copying text from tree
     auto shortcut = new QShortcut(QKeySequence::Copy, ui->modTreeWidget);
-    connect(shortcut, &QShortcut::activated, this, [this]() {
+    connect(shortcut, &QShortcut::activated, [this]() {
         auto currentItem = this->ui->modTreeWidget->currentItem();
         if (!currentItem)
             return;
@@ -79,7 +57,7 @@ auto ReviewMessageBox::create(QWidget* parent, QString&& title, QString&& icon) 
 
 void ReviewMessageBox::appendResource(ResourceInformation&& info)
 {
-    auto itemTop = new QTreeWidgetItem(ui->modTreeWidget->topLevelItem(0));
+    auto itemTop = new QTreeWidgetItem(ui->modTreeWidget);
     itemTop->setCheckState(0, info.enabled ? Qt::CheckState::Checked : Qt::CheckState::Unchecked);
     itemTop->setText(0, info.name);
     if (!info.enabled) {
@@ -115,21 +93,21 @@ void ReviewMessageBox::appendResource(ResourceInformation&& info)
     versionTypeItem->setText(0, tr("Version Type: %1").arg(info.version_type));
     versionTypeItem->setData(0, Qt::UserRole, info.version_type);
 
-    itemTop->setExpanded(true);
+    ui->modTreeWidget->addTopLevelItem(itemTop);
 }
 
 auto ReviewMessageBox::deselectedResources() -> QStringList
 {
     QStringList list;
 
-    auto* item = ui->modTreeWidget->topLevelItem(0)->child(0);
+    auto* item = ui->modTreeWidget->topLevelItem(0);
 
     for (int i = 1; item != nullptr; ++i) {
         if (item->checkState(0) == Qt::CheckState::Unchecked) {
             list.append(item->text(0));
         }
 
-        item = ui->modTreeWidget->topLevelItem(0)->child(i);
+        item = ui->modTreeWidget->topLevelItem(i);
     }
 
     return list;

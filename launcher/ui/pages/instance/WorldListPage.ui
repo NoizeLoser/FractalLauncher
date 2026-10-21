@@ -41,12 +41,6 @@
       <property name="alternatingRowColors">
        <bool>true</bool>
       </property>
-      <property name="selectionMode">
-       <enum>QAbstractItemView::SelectionMode::ExtendedSelection</enum>
-      </property>
-      <property name="verticalScrollMode">
-       <enum>QAbstractItemView::ScrollPerPixel</enum>
-      </property>
       <property name="rootIsDecorated">
        <bool>false</bool>
       </property>
@@ -58,6 +52,9 @@
       </property>
       <property name="allColumnsShowFocus">
        <bool>true</bool>
+      </property>
+      <property name="verticalScrollMode">
+       <enum>QAbstractItemView::ScrollPerPixel</enum>
       </property>
       <attribute name="headerStretchLastSection">
        <bool>false</bool>
@@ -91,8 +88,8 @@
    <addaction name="actionRename"/>
    <addaction name="actionCopy"/>
    <addaction name="actionRemove"/>
+   <addaction name="actionMCEdit"/>
    <addaction name="actionData_Packs"/>
-   <addaction name="actionWorldTools"/>
    <addaction name="actionReset_Icon"/>
    <addaction name="separator"/>
    <addaction name="actionCopy_Seed"/>
@@ -124,6 +121,11 @@
     <string>Delete</string>
    </property>
   </action>
+  <action name="actionMCEdit">
+   <property name="text">
+    <string>MCEdit</string>
+   </property>
+  </action>
   <action name="actionCopy_Seed">
    <property name="text">
     <string>Copy Seed</string>
@@ -145,14 +147,6 @@
    </property>
    <property name="toolTip">
     <string>Remove world icon to make the game re-generate it on next load.</string>
-   </property>
-  </action>
-  <action name="actionWorldTools">
-   <property name="text">
-    <string>Tools</string>
-   </property>
-   <property name="toolTip">
-    <string>Run an external tool on the selected world.</string>
    </property>
   </action>
   <action name="actionData_Packs">

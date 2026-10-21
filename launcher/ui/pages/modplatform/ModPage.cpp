@@ -40,83 +40,42 @@
 #include "ModPage.h"
 #include "ui_ResourcePage.h"
 
+#include <QDesktopServices>
+#include <QKeyEvent>
 #include <QRegularExpression>
 
 #include <memory>
-#include <utility>
 
 #include "Application.h"
+#include "ResourceDownloadTask.h"
+
+#include "minecraft/MinecraftInstance.h"
+
 #include "ui/dialogs/ResourceDownloadDialog.h"
 
-namespace {
-ResourceDownload::ResourceDescriptor prepareModDescriptor()
-{
-    QMap<QString, QString> urlHandlers;
-    urlHandlers.insert(QRegularExpression::anchoredPattern(R"((?:www\.)?modrinth\.com\/mod\/([^\/]+)\/?)"), "modrinth");
-    urlHandlers.insert(QRegularExpression::anchoredPattern(R"((?:www\.)?curseforge\.com\/minecraft\/mc-mods\/([^\/]+)\/?)"), "curseforge");
-    urlHandlers.insert(QRegularExpression::anchoredPattern(R"(minecraft\.curseforge\.com\/projects\/([^\/]+)\/?)"), "curseforge");
-    return {
-        .helpPage = "Mod-platform",
-        //: The singular version of 'mods'
-        .resourceString = QObject::tr("mod"),
-        //: The plural version of 'mod'
-        .resourcesString = QObject::tr("mods"),
-        .supportsFiltering = true,
-        .isIndexed = true,
-        .urlHandlers = urlHandlers,
-    };
-}
-}  // namespace
-
 namespace ResourceDownload {
-ModPage::ModPage(ResourceDownloadDialog* dialog,
-                 BaseInstance& instance,
-                 ResourceProviderData p,
-                 const ResourceAPI* api,
-                 ModFilterWidget* filterWidget)
-    : ResourcePage(dialog, instance, prepareModDescriptor(), std::move(p)), m_api(api)
+
+ModPage::ModPage(ModDownloadDialog* dialog, BaseInstance& instance) : ResourcePage(dialog, instance)
 {
-    auto* model = new ModModel(instance, getDialog()->getBaseModel(), api, debugName(), metaEntryBase());
-    m_model = model;
-    m_ui->packView->setModel(m_model);
-
-    addSortings();
-
-    // sometimes Qt just ignores virtual slots and doesn't work as intended it seems,
-    // so it's best not to connect them in the parent's constructor...
-    setFilterWidget(filterWidget);
-    model->setFilter(getFilter());
-
-    connect(m_model, &ResourceModel::versionListUpdated, this, &ResourcePage::versionListUpdated);
-    connect(m_model, &ResourceModel::projectInfoUpdated, this, &ResourcePage::updateUi);
-    connect(m_model, &QAbstractListModel::modelReset, this, &ResourcePage::modelReset);
-
-    connect(m_ui->sortByBox, &QComboBox::currentIndexChanged, this, &ModPage::triggerSearch);
-    connect(m_ui->packView->selectionModel(), &QItemSelectionModel::currentChanged, this, &ModPage::onSelectionChanged);
-    connect(m_ui->versionSelectionBox, &QComboBox::currentIndexChanged, this, &ModPage::onVersionSelectionChanged);
-    connect(m_ui->resourceSelectionButton, &QPushButton::clicked, this, &ModPage::onResourceSelected);
-
-    m_ui->packDescription->setMetaEntry(metaEntryBase());
     connect(m_ui->resourceFilterButton, &QPushButton::clicked, this, &ModPage::filterMods);
 }
 
-void ModPage::setFilterWidget(ModFilterWidget* widget)
+void ModPage::setFilterWidget(std::unique_ptr<ModFilterWidget>& widget)
 {
-    if (m_filterWidget) {
-        disconnect(m_filterWidget.get(), nullptr, nullptr, nullptr);
+    if (m_filter_widget) {
+        disconnect(m_filter_widget.get(), nullptr, nullptr, nullptr);
     }
 
-    auto* old = m_ui->splitter->replaceWidget(0, widget);
+    auto* old = m_ui->splitter->replaceWidget(0, widget.get());
     // because we replaced the widget we also need to delete it
-    if (old) {
-        old->deleteLater();
-    }
 
-    m_filterWidget.reset(widget);
+    delete old;
 
-    m_filter = m_filterWidget->getFilter();
+    m_filter_widget.swap(widget);
 
-    connect(m_filterWidget.get(), &ModFilterWidget::filterChanged, this, &ModPage::triggerSearch);
+    m_filter = m_filter_widget->getFilter();
+
+    connect(m_filter_widget.get(), &ModFilterWidget::filterChanged, this, &ModPage::triggerSearch);
     prepareProviderCategories();
 }
 
@@ -124,18 +83,13 @@ void ModPage::setFilterWidget(ModFilterWidget* widget)
 
 void ModPage::filterMods()
 {
-    m_filterWidget->setHidden(!m_filterWidget->isHidden());
+    m_filter_widget->setHidden(!m_filter_widget->isHidden());
 }
 
 void ModPage::triggerSearch()
 {
-    if (inProjectMode() && getCurrentPack()) {
-        reloadCurrentVersions();
-        return;
-    }
-
-    auto changed = m_filterWidget->changed();
-    m_filter = m_filterWidget->getFilter();
+    auto changed = m_filter_widget->changed();
+    m_filter = m_filter_widget->getFilter();
     m_ui->packView->selectionModel()->setCurrentIndex({}, QItemSelectionModel::SelectionFlag::ClearAndSelect);
     m_ui->packView->clearSelection();
     m_ui->packDescription->clear();
@@ -146,22 +100,24 @@ void ModPage::triggerSearch()
     m_fetchProgress.watch(m_model->activeSearchJob().get());
 }
 
-void ModPage::openProject(const QVariant& projectID)
+QMap<QString, QString> ModPage::urlHandlers() const
 {
-    ResourcePage::openProject(projectID);
-
-    m_filterWidget->setLoaderVersionOnly(true);
-    m_ui->resourceFilterButton->setVisible(true);
+    QMap<QString, QString> map;
+    map.insert(QRegularExpression::anchoredPattern("(?:www\\.)?modrinth\\.com\\/mod\\/([^\\/]+)\\/?"), "modrinth");
+    map.insert(QRegularExpression::anchoredPattern("(?:www\\.)?curseforge\\.com\\/minecraft\\/mc-mods\\/([^\\/]+)\\/?"), "curseforge");
+    map.insert(QRegularExpression::anchoredPattern("minecraft\\.curseforge\\.com\\/projects\\/([^\\/]+)\\/?"), "curseforge");
+    return map;
 }
 
-void ModPage::prepareProviderCategories()
+/******** Make changes to the UI ********/
+
+void ModPage::addResourceToPage(ModPlatform::IndexedPack::Ptr pack,
+                                ModPlatform::IndexedVersion& version,
+                                ResourceFolderModel* baseModel,
+                                QString downloadReason)
 {
-    auto [task, response] = m_api->getModCategories();
-    m_categoriesTask = task;
-    connect(m_categoriesTask.get(), &Task::succeeded, this, [this, response]() {
-        auto categories = m_api->loadModCategories(*response);
-        m_filterWidget->setCategories(categories);
-    });
-    m_categoriesTask->start();
-};
+    bool isIndexed = !APPLICATION->settings()->get("ModMetadataDisabled").toBool();
+    m_model->addPack(pack, version, baseModel, isIndexed, downloadReason);
+}
+
 }  // namespace ResourceDownload

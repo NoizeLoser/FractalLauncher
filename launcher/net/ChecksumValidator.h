@@ -38,35 +38,48 @@
 #include "Validator.h"
 
 #include <QCryptographicHash>
-#include <expected>
-#include <utility>
 
 namespace Net {
 class ChecksumValidator : public Validator {
    public:
-    ChecksumValidator(QCryptographicHash::Algorithm algorithm, const QString& expectedHex)
+    ChecksumValidator(QCryptographicHash::Algorithm algorithm, QString expectedHex)
         : Net::ChecksumValidator(algorithm, QByteArray::fromHex(expectedHex.toLatin1()))
     {}
-    explicit ChecksumValidator(QCryptographicHash::Algorithm algorithm, QByteArray expected = QByteArray())
-        : m_checksum(algorithm), m_expected(std::move(expected)) {};
-    ~ChecksumValidator() override = default;
+    ChecksumValidator(QCryptographicHash::Algorithm algorithm, QByteArray expected = QByteArray())
+        : m_checksum(algorithm), m_expected(expected) {};
+    virtual ~ChecksumValidator() = default;
 
    public:
-    void init() override { m_checksum.reset(); }
-    void write(const QByteArray& data) override { m_checksum.addData(data); }
-    void abort() override { m_checksum.reset(); }
+    auto init(QNetworkRequest&) -> bool override
+    {
+        m_checksum.reset();
+        return true;
+    }
 
-    Result<> validate() override
+    auto write(QByteArray& data) -> bool override
+    {
+        m_checksum.addData(data);
+        return true;
+    }
+
+    auto abort() -> bool override
+    {
+        m_checksum.reset();
+        return true;
+    }
+
+    auto validate(QNetworkReply& reply) -> bool override
     {
         if (!m_expected.isEmpty() && m_expected != hash()) {
-            return std::unexpected(QString("Checksum mismatch: expected %1, got %2").arg(m_expected.toHex(), hash().toHex()));
+            qWarning() << "Checksum mismatch for URL:" << reply.url().toString() << "expected:" << m_expected << "got:" << hash();
+            return false;
         }
-        return {};
+        return true;
     }
 
     auto hash() -> QByteArray { return m_checksum.result(); }
 
-    void setExpected(QByteArray expected) { m_expected = std::move(expected); }
+    void setExpected(QByteArray expected) { m_expected = expected; }
 
    private:
     QCryptographicHash m_checksum;

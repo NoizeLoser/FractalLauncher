@@ -20,8 +20,6 @@
 #include <QDir>
 #include <QFuture>
 #include <QFutureWatcher>
-
-#include "Result.h"
 #include "archive/ArchiveReader.h"
 #include "tasks/Task.h"
 
@@ -35,11 +33,13 @@ class ExtractZipTask : public Task {
     {}
     virtual ~ExtractZipTask() = default;
 
+    using ZipResult = std::optional<QString>;
+
    protected:
     virtual void executeTask() override;
     bool abort() override;
 
-    Result<> extractZip();
+    ZipResult extractZip();
     void finish();
 
    private:
@@ -47,7 +47,7 @@ class ExtractZipTask : public Task {
     QDir m_outputDir;
     QString m_subdirectory;
 
-    QFuture<Result<>> m_zipFuture;
-    QFutureWatcher<Result<>> m_zipWatcher;
+    QFuture<ZipResult> m_zipFuture;
+    QFutureWatcher<ZipResult> m_zipWatcher;
 };
 }  // namespace MMCZip

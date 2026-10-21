@@ -26,19 +26,19 @@ class QCheckBox;
 class LanguageSelectionWidget : public QWidget {
     Q_OBJECT
    public:
-    explicit LanguageSelectionWidget(QWidget* parent = nullptr);
-    ~LanguageSelectionWidget() override = default;
+    explicit LanguageSelectionWidget(QWidget* parent = 0);
+    virtual ~LanguageSelectionWidget() {};
 
     QString getSelectedLanguageKey() const;
     void retranslate();
 
    protected slots:
     void languageRowChanged(const QModelIndex& current, const QModelIndex& previous);
-    void languageSettingChanged(const Setting& /*unused*/, const QVariant& /*unused*/);
+    void languageSettingChanged(const Setting&, const QVariant&);
 
    private:
-    QVBoxLayout* m_verticalLayout = nullptr;
-    QTreeView* m_languageView = nullptr;
-    QLabel* m_helpUsLabel = nullptr;
-    QCheckBox* m_formatCheckbox = nullptr;
+    QVBoxLayout* verticalLayout = nullptr;
+    QTreeView* languageView = nullptr;
+    QLabel* helpUsLabel = nullptr;
+    QCheckBox* formatCheckbox = nullptr;
 };

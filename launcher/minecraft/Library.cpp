@@ -35,11 +35,11 @@
 
 #include "Library.h"
 #include "MinecraftInstance.h"
-#include "net/Request.h"
+#include "net/NetRequest.h"
 
 #include <BuildConfig.h>
 #include <FileSystem.h>
-#include <net/ApiRequest.h>
+#include <net/ApiDownload.h>
 #include <net/ChecksumValidator.h>
 
 /**
@@ -103,14 +103,14 @@ void Library::getApplicableFiles(const RuntimeContext& runtimeContext,
  * @param cache Pointer to the HTTP meta cache.
  * @param failedLocalFiles List to store paths for failed local files.
  * @param overridePath Optional path to override the default storage path.
- * @return QList<Net::Request::Ptr> List of download requests.
+ * @return QList<Net::NetRequest::Ptr> List of download requests.
  */
-QList<Net::Request::Ptr> Library::getDownloads(const RuntimeContext& runtimeContext,
+QList<Net::NetRequest::Ptr> Library::getDownloads(const RuntimeContext& runtimeContext,
                                                   class HttpMetaCache* cache,
                                                   QStringList& failedLocalFiles,
                                                   const QString& overridePath) const
 {
-    QList<Net::Request::Ptr> out;
+    QList<Net::NetRequest::Ptr> out;
     bool stale = isAlwaysStale();
     bool local = isLocal();
 
@@ -138,21 +138,21 @@ QList<Net::Request::Ptr> Library::getDownloads(const RuntimeContext& runtimeCont
         }
         if (!entry->isStale())
             return true;
-        Net::Request::Options options;
+        Net::Download::Options options;
         if (stale) {
-            options |= Net::Request::Option::AcceptLocalFiles;
+            options |= Net::Download::Option::AcceptLocalFiles;
         }
 
         // Don't add a time limit for the libraries cache entry validity
-        options |= Net::Request::Option::MakeEternal;
+        options |= Net::Download::Option::MakeEternal;
 
         if (sha1.size()) {
-            auto dl = Net::ApiRequest::makeCached(url, entry, options);
+            auto dl = Net::ApiDownload::makeCached(url, entry, options);
             dl->addValidator(new Net::ChecksumValidator(QCryptographicHash::Sha1, sha1));
             qDebug() << "Checksummed Download for:" << rawName().serialize() << "storage:" << storage << "url:" << url << "expected sha1:" << sha1;
             out.append(dl);
         } else {
-            out.append(Net::ApiRequest::makeCached(url, entry, options));
+            out.append(Net::ApiDownload::makeCached(url, entry, options));
             qDebug() << "Download for:" << rawName().serialize() << "storage:" << storage << "url:" << url;
         }
         return true;

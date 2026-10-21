@@ -183,7 +183,8 @@ void POTranslatorPrivate::reload()
                 nextFuzzy = true;
             }
         } else if (line.startsWith('"')) {
-            QByteArray* out = nullptr;
+            QByteArray temp;
+            QByteArray* out = &temp;
 
             switch (mode) {
                 case Mode::First:

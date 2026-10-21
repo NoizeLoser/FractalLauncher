@@ -11,12 +11,17 @@
 #include "ui_ManagedPackPage.h"
 
 #include <QFileDialog>
+#include <QListView>
+#include <QProxyStyle>
+#include <QStyleFactory>
 #include <memory>
 
 #include "Application.h"
+#include "BuildConfig.h"
 #include "InstanceImportTask.h"
 #include "InstanceList.h"
 #include "InstanceTask.h"
+#include "Json.h"
 #include "Markdown.h"
 #include "StringUtils.h"
 
@@ -24,24 +29,79 @@
 #include "ui/dialogs/CustomMessageBox.h"
 #include "ui/dialogs/ProgressDialog.h"
 
-ManagedPackPage* ManagedPackPage::createPage(BaseInstance* inst, const QString& type, QWidget* parent)
+#include "net/ApiDownload.h"
+
+/** This is just to override the combo box popup behavior so that the combo box doesn't take the whole screen.
+ *  ... thanks Qt.
+ */
+class NoBigComboBoxStyle : public QProxyStyle {
+    Q_OBJECT
+
+   public:
+    // clang-format off
+    int styleHint(QStyle::StyleHint hint, const QStyleOption* option = nullptr, const QWidget* widget = nullptr, QStyleHintReturn* returnData = nullptr) const override
+    {
+        if (hint == QStyle::SH_ComboBox_Popup)
+            return false;
+
+        return QProxyStyle::styleHint(hint, option, widget, returnData);
+    }
+    // clang-format on
+
+    /**
+     * Something about QProxyStyle and QStyle objects means they can't be free'd just
+     * because all the widgets using them are gone.
+     * They seems to be tied to the QApplicaiton lifecycle.
+     * So make singletons tied to the lifetime of the application to clean them up and ensure they aren't
+     * being remade over and over again, thus leaking memory.
+     */
+   public:
+    static NoBigComboBoxStyle* getInstance(QStyle* style)
+    {
+        static QHash<QStyle*, NoBigComboBoxStyle*> s_singleton_instances_ = {};
+        static std::mutex s_singleton_instances_mutex_;
+
+        std::lock_guard<std::mutex> lock(s_singleton_instances_mutex_);
+        auto inst_iter = s_singleton_instances_.constFind(style);
+        NoBigComboBoxStyle* inst = nullptr;
+        if (inst_iter == s_singleton_instances_.constEnd() || *inst_iter == nullptr) {
+            inst = new NoBigComboBoxStyle(style);
+            inst->setParent(APPLICATION);
+            s_singleton_instances_.insert(style, inst);
+            qDebug() << "QProxyStyle NoBigComboBox created for" << style->objectName() << style;
+        } else {
+            inst = *inst_iter;
+        }
+        return inst;
+    }
+
+   private:
+    NoBigComboBoxStyle(QStyle* style) : QProxyStyle(style) {}
+};
+
+ManagedPackPage* ManagedPackPage::createPage(BaseInstance* inst, QString type, QWidget* parent)
 {
-    if (type == "modrinth") {
+    if (type == "modrinth")
         return new ModrinthManagedPackPage(inst, nullptr, parent);
-    }
-    if (type == "flame" && ((APPLICATION->capabilities() & Application::SupportsFlame) != 0U)) {
+    if (type == "flame" && (APPLICATION->capabilities() & Application::SupportsFlame))
         return new FlameManagedPackPage(inst, nullptr, parent);
-    }
 
     return new GenericManagedPackPage(inst, nullptr, parent);
 }
 
-ManagedPackPage::ManagedPackPage(BaseInstance* inst, InstanceWindow* instanceWindow, QWidget* parent)
-    : QWidget(parent), m_instanceWindow(instanceWindow), ui(new Ui::ManagedPackPage), m_inst(inst)
+ManagedPackPage::ManagedPackPage(BaseInstance* inst, InstanceWindow* instance_window, QWidget* parent)
+    : QWidget(parent), m_instance_window(instance_window), ui(new Ui::ManagedPackPage), m_inst(inst)
 {
     Q_ASSERT(inst);
 
     ui->setupUi(this);
+
+    // NOTE: GTK2 themes crash with the proxy style.
+    // This seems like an upstream bug, so there's not much else that can be done.
+    if (!QStyleFactory::keys().contains("gtk2")) {
+        auto comboStyle = NoBigComboBoxStyle::getInstance(ui->versionsComboBox->style());
+        ui->versionsComboBox->setStyle(comboStyle);
+    }
 
     ui->versionsComboBox->view()->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     ui->versionsComboBox->view()->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
@@ -55,22 +115,20 @@ ManagedPackPage::ManagedPackPage(BaseInstance* inst, InstanceWindow* instanceWin
         openedImpl();
     });
 
-    connect(ui->changelogTextBrowser, &QTextBrowser::anchorClicked, this, [](const QUrl& url) {
+    connect(ui->changelogTextBrowser, &QTextBrowser::anchorClicked, this, [](const QUrl url) {
         if (url.scheme().isEmpty()) {
             auto querry =
                 QUrlQuery(url.query()).queryItemValue("remoteUrl", QUrl::FullyDecoded);  // curseforge workaround for linkout?remoteUrl=
             auto decoded = QUrl::fromPercentEncoding(querry.toUtf8());
             auto newUrl = QUrl(decoded);
-            if (newUrl.isValid() && (newUrl.scheme() == "http" || newUrl.scheme() == "https")) {
+            if (newUrl.isValid() && (newUrl.scheme() == "http" || newUrl.scheme() == "https"))
                 QDesktopServices ::openUrl(newUrl);
-            }
             return;
         }
         QDesktopServices::openUrl(url);
     });
 
-    connect(ui->urlLine, &QLineEdit::textChanged, this,
-            [this](const QString& text) { m_inst->settings()->set("ManagedPackURL", text.trimmed()); });
+    connect(ui->urlLine, &QLineEdit::textChanged, this, [this](QString text) { m_inst->settings()->set("ManagedPackURL", text.trimmed()); });
 }
 
 ManagedPackPage::~ManagedPackPage()
@@ -111,12 +169,10 @@ void ManagedPackPage::openedImpl()
 QString ManagedPackPage::displayName() const
 {
     auto type = m_inst->getManagedPackType();
-    if (type.isEmpty()) {
+    if (type.isEmpty())
         return {};
-    }
-    if (type == "flame") {
+    if (type == "flame")
         type = "CurseForge";
-    }
     return type.replace(0, 1, type[0].toUpper());
 }
 
@@ -144,22 +200,26 @@ bool ManagedPackPage::runUpdateTask(InstanceTask* task)
 {
     Q_ASSERT(task);
 
-    const unique_qobject_ptr<Task> wrappedTask(APPLICATION->instances()->wrapInstanceTask(task));
+    unique_qobject_ptr<Task> wrapped_task(APPLICATION->instances()->wrapInstanceTask(task));
 
-    connect(wrappedTask.get(), &Task::failed, this,
+    connect(wrapped_task.get(), &Task::failed,
             [this](const QString& reason) { CustomMessageBox::selectable(this, tr("Error"), reason, QMessageBox::Critical)->show(); });
-    connect(wrappedTask.get(), &Task::succeeded, this, [this, task]() {
+    connect(wrapped_task.get(), &Task::succeeded, [this, task]() {
         QStringList warnings = task->warnings();
         if (warnings.count()) {
             CustomMessageBox::selectable(this, tr("Warnings"), warnings.join('\n'), QMessageBox::Warning)->show();
         }
     });
+    connect(wrapped_task.get(), &Task::aborted, [this] {
+        CustomMessageBox::selectable(this, tr("Task aborted"), tr("The task has been aborted by the user."), QMessageBox::Information)
+            ->show();
+    });
 
     ProgressDialog loadDialog(this);
-    loadDialog.showSkipButton();
-    loadDialog.execWithTask(wrappedTask.get());
+    loadDialog.setSkipButton(true, tr("Abort"));
+    loadDialog.execWithTask(wrapped_task.get());
 
-    return wrappedTask->wasSuccessful();
+    return wrapped_task->wasSuccessful();
 }
 
 void ManagedPackPage::suggestVersion()
@@ -186,8 +246,8 @@ void ManagedPackPage::setFailState()
     ui->reloadButton->setVisible(true);
 }
 
-ModrinthManagedPackPage::ModrinthManagedPackPage(BaseInstance* inst, InstanceWindow* instanceWindow, QWidget* parent)
-    : ManagedPackPage(inst, instanceWindow, parent)
+ModrinthManagedPackPage::ModrinthManagedPackPage(BaseInstance* inst, InstanceWindow* instance_window, QWidget* parent)
+    : ManagedPackPage(inst, instance_window, parent)
 {
     Q_ASSERT(inst->isManagedPack());
     connect(ui->versionsComboBox, &QComboBox::currentIndexChanged, this, &ModrinthManagedPackPage::suggestVersion);
@@ -205,15 +265,15 @@ void ModrinthManagedPackPage::parseManagedPack()
         return;
     }
 
-    if (m_fetchJob && m_fetchJob->isRunning()) {
-        m_fetchJob->abort();
+    if (m_fetch_job && m_fetch_job->isRunning()) {
+        m_fetch_job->abort();
     }
 
     ResourceAPI::Callback<QVector<ModPlatform::IndexedVersion>> callbacks{};
     m_pack = { .addonId = m_inst->getManagedPackID() };
 
     // Use default if no callbacks are set
-    callbacks.onSucceed = [this](auto& doc) {
+    callbacks.on_succeed = [this](auto& doc) {
         m_pack.versions = doc;
         m_pack.versionsLoaded = true;
 
@@ -238,18 +298,18 @@ void ModrinthManagedPackPage::parseManagedPack()
 
         m_loaded = true;
     };
-    callbacks.onFail = [this](const QString& /*reason*/, int) { setFailState(); };
-    callbacks.onAbort = [this]() { setFailState(); };
-    m_fetchJob = ModrinthAPI::get().getProjectVersions({ .pack = std::make_shared<ModPlatform::IndexedPack>(m_pack),
-                                                         .mcVersions = {},
-                                                         .loaders = {},
-                                                         .resourceType = ModPlatform::ResourceType::Modpack,
-                                                         .includeChangelog = true },
-                                                       callbacks);
+    callbacks.on_fail = [this](const QString& /*reason*/, int) { setFailState(); };
+    callbacks.on_abort = [this]() { setFailState(); };
+    m_fetch_job = m_api.getProjectVersions({ .pack = std::make_shared<ModPlatform::IndexedPack>(m_pack),
+                                             .mcVersions = {},
+                                             .loaders = {},
+                                             .resourceType = ModPlatform::ResourceType::Modpack,
+                                             .includeChangelog = true },
+                                           std::move(callbacks));
 
     ui->changelogTextBrowser->setText(tr("Fetching changelogs..."));
 
-    m_fetchJob->start();
+    m_fetch_job->start();
 }
 
 QString ModrinthManagedPackPage::url() const
@@ -274,13 +334,12 @@ void ModrinthManagedPackPage::suggestVersion()
 /// @brief Called when the update task has completed.
 /// Internally handles the closing of the instance window if the update was successful and shows a message box.
 /// @param did_succeed Whether the update task was successful.
-void ManagedPackPage::onUpdateTaskCompleted(bool didSucceed) const
+void ManagedPackPage::onUpdateTaskCompleted(bool did_succeed) const
 {
     // Close the window if the update was successful
-    if (didSucceed) {
-        if (m_instanceWindow != nullptr) {
-            m_instanceWindow->close();
-        }
+    if (did_succeed) {
+        if (m_instance_window != nullptr)
+            m_instance_window->close();
 
         CustomMessageBox::selectable(nullptr, tr("Update Successful"),
                                      tr("The instance updated to pack version %1 successfully.").arg(m_inst->getManagedPackVersionName()),
@@ -316,16 +375,15 @@ void ModrinthManagedPackPage::update()
 void ModrinthManagedPackPage::updateFromFile()
 {
     auto output = QFileDialog::getOpenFileUrl(this, tr("Choose update file"), QDir::homePath(), tr("Modrinth pack") + " (*.mrpack *.zip)");
-    if (output.isEmpty()) {
+    if (output.isEmpty())
         return;
-    }
 
     updatePack(output, false);
 }
 
 // FLAME
-FlameManagedPackPage::FlameManagedPackPage(BaseInstance* inst, InstanceWindow* instanceWindow, QWidget* parent)
-    : ManagedPackPage(inst, instanceWindow, parent)
+FlameManagedPackPage::FlameManagedPackPage(BaseInstance* inst, InstanceWindow* instance_window, QWidget* parent)
+    : ManagedPackPage(inst, instance_window, parent)
 {
     Q_ASSERT(inst->isManagedPack());
     connect(ui->versionsComboBox, &QComboBox::currentIndexChanged, this, &FlameManagedPackPage::suggestVersion);
@@ -360,8 +418,8 @@ void FlameManagedPackPage::parseManagedPack()
         return;
     }
 
-    if (m_fetchJob && m_fetchJob->isRunning()) {
-        m_fetchJob->abort();
+    if (m_fetch_job && m_fetch_job->isRunning()) {
+        m_fetch_job->abort();
     }
 
     QString id = m_inst->getManagedPackID();
@@ -370,7 +428,7 @@ void FlameManagedPackPage::parseManagedPack()
     ResourceAPI::Callback<QVector<ModPlatform::IndexedVersion>> callbacks{};
 
     // Use default if no callbacks are set
-    callbacks.onSucceed = [this](auto& doc) {
+    callbacks.on_succeed = [this](auto& doc) {
         m_pack.versions = doc;
         m_pack.versionsLoaded = true;
 
@@ -393,16 +451,16 @@ void FlameManagedPackPage::parseManagedPack()
 
         m_loaded = true;
     };
-    callbacks.onFail = [this](const QString& /*reason*/, int) { setFailState(); };
-    callbacks.onAbort = [this]() { setFailState(); };
-    m_fetchJob = FlameAPI::get().getProjectVersions({ .pack = std::make_shared<ModPlatform::IndexedPack>(m_pack),
-                                                      .mcVersions = {},
-                                                      .loaders = {},
-                                                      .resourceType = ModPlatform::ResourceType::Modpack,
-                                                      .includeChangelog = true },
-                                                    callbacks);
+    callbacks.on_fail = [this](const QString& /*reason*/, int) { setFailState(); };
+    callbacks.on_abort = [this]() { setFailState(); };
+    m_fetch_job = m_api.getProjectVersions({ .pack = std::make_shared<ModPlatform::IndexedPack>(m_pack),
+                                             .mcVersions = {},
+                                             .loaders = {},
+                                             .resourceType = ModPlatform::ResourceType::Modpack,
+                                             .includeChangelog = true },
+                                           std::move(callbacks));
 
-    m_fetchJob->start();
+    m_fetch_job->start();
 }
 
 QString FlameManagedPackPage::url() const
@@ -421,7 +479,7 @@ void FlameManagedPackPage::suggestVersion()
     auto version = m_pack.versions.at(index);
 
     ui->changelogTextBrowser->setHtml(
-        StringUtils::htmlListPatch(FlameAPI::getModFileChangelog(m_inst->getManagedPackID().toInt(), version.fileId.toInt())));
+        StringUtils::htmlListPatch(m_api.getModFileChangelog(m_inst->getManagedPackID().toInt(), version.fileId.toInt())));
 
     ManagedPackPage::suggestVersion();
 }
@@ -446,56 +504,36 @@ void FlameManagedPackPage::update()
 void FlameManagedPackPage::updateFromFile()
 {
     auto output = QFileDialog::getOpenFileUrl(this, tr("Choose update file"), QDir::homePath(), tr("CurseForge pack") + " (*.zip)");
-    if (output.isEmpty()) {
+    if (output.isEmpty())
         return;
-    }
 
     updatePack(output, false);
 }
 
-void ManagedPackPage::updatePack(const QUrl& url, bool trusted, const QString& versionID, const QString& versionName)
+void ManagedPackPage::updatePack(const QUrl& url, bool trusted, QString versionID, QString versionName)
 {
-    QString confirmMessage;
-    if (versionID.isEmpty()) {
-        confirmMessage =
-            tr("You are about to update the modpack to a new version.\n"
-               "Irreversible changes may be made to the instance's files.\n"
-               "As such, it is strongly recommended to create a backup copy of the instance.\n\n"
-               "Are you sure?");
-    } else {
-        confirmMessage = tr("You are about to update the modpack to version \"%1\".\n"
-                            "Irreversible changes may be made to the instance's files.\n"
-                            "As such, it is strongly recommended to create a backup copy of the instance.\n\n"
-                            "Are you sure?")
-                             .arg(versionName);
-    }
-
-    auto response = CustomMessageBox::selectable(this, tr("Confirm Update"), confirmMessage, QMessageBox::Warning,
-                                                 QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
-                        ->exec();
-    if (response != QMessageBox::Yes) {
-        return;
-    }
-
-    QMap<QString, QString> extraInfo;
+    QMap<QString, QString> extra_info;
     // NOTE: Don't use 'm_pack.id' here, since we didn't completely parse all the metadata for the pack, including this field.
-    extraInfo.insert("pack_id", m_inst->getManagedPackID());
-    extraInfo.insert("pack_version_id", versionID);
-    extraInfo.insert("original_instance_id", m_inst->id());
+    extra_info.insert("pack_id", m_inst->getManagedPackID());
+    extra_info.insert("pack_version_id", versionID);
+    extra_info.insert("original_instance_id", m_inst->id());
 
-    auto* extracted = new InstanceImportTask(url, trusted, this, std::move(extraInfo));
+    auto extracted = new InstanceImportTask(url, trusted, this, std::move(extra_info));
 
     if (versionName.isEmpty()) {
         extracted->setName(m_inst->name());
     } else {
-        extracted->setOriginalName(m_inst->getManagedPackName(), versionName);
-        extracted->setName(m_inst->name().replace(m_inst->getManagedPackVersionName(), versionName));
+        InstanceName inst_name(m_inst->getManagedPackName(), versionName);
+        inst_name.setName(m_inst->name().replace(m_inst->getManagedPackVersionName(), versionName));
+        extracted->setName(inst_name);
     }
     extracted->setGroup(APPLICATION->instances()->getInstanceGroup(m_inst->id()));
     extracted->setIcon(m_inst->iconKey());
     extracted->setConfirmUpdate(false);
 
     // Run our task then handle the result
-    auto didSucceed = runUpdateTask(extracted);
-    onUpdateTaskCompleted(didSucceed);
+    auto did_succeed = runUpdateTask(extracted);
+    onUpdateTaskCompleted(did_succeed);
 }
+
+#include "ManagedPackPage.moc"

@@ -9,8 +9,7 @@ class ModrinthCheckUpdate : public CheckUpdateTask {
     ModrinthCheckUpdate(QList<Resource*>& resources,
                         std::vector<Version>& mcVersions,
                         QList<ModPlatform::ModLoaderType> loadersList,
-                        ResourceFolderModel* resourceModel,
-                        std::vector<ModPlatform::IndexedVersionType> releaseTypes = {});
+                        ResourceFolderModel* resourceModel);
 
    public slots:
     bool abort() override;

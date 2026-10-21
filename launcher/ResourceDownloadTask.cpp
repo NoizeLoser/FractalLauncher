@@ -31,23 +31,29 @@
 #include "minecraft/mod/ShaderPackFolderModel.h"
 #include "modplatform/ModIndex.h"
 #include "modplatform/helpers/HashUtils.h"
-#include "net/ApiRequest.h"
+#include "net/ApiDownload.h"
 #include "net/ChecksumValidator.h"
 
 namespace {
-Net::ModrinthDownloadMeta createModrinthMeta(MinecraftInstance* instance, QString reason, QString dependentOn)
+Net::ModrinthDownloadMeta createModrinthMeta(BaseInstance* instance, QString reason)
 {
-    auto* profile = instance->getPackProfile();
+    auto* mcInstance = dynamic_cast<MinecraftInstance*>(instance);
+    if (!mcInstance) {
+        return {};
+    }
+
+    auto* profile = mcInstance->getPackProfile();
     if (!profile) {
         return {};
     }
 
     auto loaders = profile->getModLoadersList();
 
-    return { .reason = std::move(reason),
-             .gameVersion = profile->getComponentVersion("net.minecraft"),
-             .loader = !loaders.isEmpty() ? ModPlatform::getModLoaderAsString(loaders.first()) : "",
-             .dependentOn = std::move(dependentOn) };
+    return {
+        .reason = std::move(reason),
+        .gameVersion = profile->getComponentVersion("net.minecraft"),
+        .loader = !loaders.isEmpty() ? ModPlatform::getModLoaderAsString(loaders.first()) : "",
+    };
 }
 }  // namespace
 
@@ -55,8 +61,7 @@ ResourceDownloadTask::ResourceDownloadTask(ModPlatform::IndexedPack::Ptr pack,
                                            ModPlatform::IndexedVersion version,
                                            ResourceFolderModel* packs,
                                            bool isIndexed,
-                                           QString downloadReason,
-                                           QString dependentOn)
+                                           QString downloadReason)
     : m_pack(std::move(pack)), m_pack_version(std::move(version)), m_pack_model(packs)
 {
     if (isIndexed) {
@@ -69,11 +74,11 @@ ResourceDownloadTask::ResourceDownloadTask(ModPlatform::IndexedPack::Ptr pack,
     m_filesNetJob.reset(new NetJob(tr("Resource download"), APPLICATION->network()));
     m_filesNetJob->setStatus(tr("Downloading resource:\n%1").arg(m_pack_version.downloadUrl));
 
-    auto action = Net::ApiRequest::makeFile(
-        m_pack_version.downloadUrl, m_pack_model->dir().absoluteFilePath(getFilename()), Net::Request::Option::NoOptions,
-        createModrinthMeta(m_pack_model->instance(), std::move(downloadReason), std::move(dependentOn)));
-    if (!m_pack_version.hashType.isEmpty() && !m_pack_version.hash.isEmpty()) {
-        switch (Hashing::algorithmFromString(m_pack_version.hashType)) {
+    auto action = Net::ApiDownload::makeFile(m_pack_version.downloadUrl, m_pack_model->dir().absoluteFilePath(getFilename()),
+                                             Net::Download::Option::NoOptions,
+                                             createModrinthMeta(m_pack_model->instance(), std::move(downloadReason)));
+    if (!m_pack_version.hash_type.isEmpty() && !m_pack_version.hash.isEmpty()) {
+        switch (Hashing::algorithmFromString(m_pack_version.hash_type)) {
             case Hashing::Algorithm::Md4:
                 action->addValidator(new Net::ChecksumValidator(QCryptographicHash::Algorithm::Md4, m_pack_version.hash));
                 break;

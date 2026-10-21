@@ -45,6 +45,7 @@
 #include <FileSystem.h>
 #include <GZip.h>
 #include <QDir>
+#include <QDirIterator>
 #include <QFileSystemWatcher>
 #include <QShortcut>
 #include <QUrl>
@@ -310,30 +311,28 @@ void OtherLogsPage::reload()
         }
         m_model->clear();
         if (file.fileName().endsWith(".gz")) {
-            QByteArray buffer;
-            auto error = GZip::readGzFileByBlocks(&file, [handleLine, &buffer](const QByteArray& d) {
-                const auto block = buffer + d;
-                auto view = QByteArrayView{ block };
-
-                qsizetype newlineIndex = -1;
-                while ((newlineIndex = view.indexOf('\n')) != -1) {
-                    if (handleLine(QString::fromUtf8(view.first(newlineIndex)))) {
-                        buffer.clear();
+            QString line;
+            auto error = GZip::readGzFileByBlocks(&file, [&line, handleLine](const QByteArray& d) {
+                auto block = d;
+                int newlineIndex = block.indexOf('\n');
+                while (newlineIndex != -1) {
+                    line += QString::fromUtf8(block).left(newlineIndex);
+                    block.remove(0, newlineIndex + 1);
+                    if (handleLine(line)) {
+                        line.clear();
                         return false;
                     }
-                    view = view.sliced(newlineIndex + 1);
+                    line.clear();
+                    newlineIndex = block.indexOf('\n');
                 }
-
-                buffer = QByteArray{ view };
+                line += QString::fromUtf8(block);
                 return true;
             });
-
             if (!error.isEmpty()) {
                 setPlainText(tr("The file (%1) encountered an error when reading: %2.").arg(file.fileName(), error));
                 return;
-            }
-            if (!buffer.isEmpty()) {
-                handleLine(QString::fromUtf8(buffer));
+            } else if (!line.isEmpty()) {
+                handleLine(line);
             }
         } else {
             while (!file.atEnd() && !handleLine(QString::fromUtf8(file.readLine()))) {
@@ -356,10 +355,7 @@ void OtherLogsPage::reload()
 void OtherLogsPage::on_btnPaste_clicked()
 {
     QString name = m_currentFile.isEmpty() ? displayName() : m_currentFile;
-    auto res = GuiUtil::uploadPaste(name, ui->text->toPlainText(), this);
-    if (!res) {
-        qWarning() << "Log upload failed:" << res.error();
-    }
+    GuiUtil::uploadPaste(name, ui->text->toPlainText(), this);
 }
 
 void OtherLogsPage::on_btnCopy_clicked()
@@ -374,9 +370,8 @@ void OtherLogsPage::on_btnBottom_clicked()
 
 void OtherLogsPage::on_trackLogCheckbox_clicked(bool checked)
 {
-    if (!m_model) {
+    if (!m_model)
         return;
-    }
     m_model->suspend(!checked);
 }
 

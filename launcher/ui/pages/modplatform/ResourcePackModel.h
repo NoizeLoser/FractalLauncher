@@ -6,6 +6,8 @@
 
 #include <QAbstractListModel>
 
+#include "BaseInstance.h"
+
 #include "ui/pages/modplatform/ResourceModel.h"
 
 class Version;
@@ -16,7 +18,7 @@ class ResourcePackResourceModel : public ResourceModel {
     Q_OBJECT
 
    public:
-    ResourcePackResourceModel(ResourceFolderModel*, const ResourceAPI*, const QString& debugName, QString metaEntryBase);
+    ResourcePackResourceModel(const BaseInstance&, ResourceAPI*, const QString& debugName, QString metaEntryBase);
 
     /* Ask the API for more information */
     void searchWithTerm(const QString& term, unsigned int sort);
@@ -27,6 +29,10 @@ class ResourcePackResourceModel : public ResourceModel {
    public slots:
     ResourceAPI::SearchArgs createSearchArguments() override;
     ResourceAPI::VersionSearchArgs createVersionsArguments(const QModelIndex&) override;
+    ResourceAPI::ProjectInfoArgs createInfoArguments(const QModelIndex&) override;
+
+   protected:
+    const BaseInstance& m_base_instance;
 
    private:
     QString m_debugName;

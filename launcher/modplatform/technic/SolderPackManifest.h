@@ -22,8 +22,6 @@
 #include <QList>
 #include <QString>
 
-#include "Result.h"
-
 namespace TechnicSolder {
 
 struct Pack {
@@ -32,7 +30,7 @@ struct Pack {
     QList<QString> builds;
 };
 
-Result<> loadPack(Pack& v, const QJsonObject& obj);
+void loadPack(Pack& v, QJsonObject& obj);
 
 struct PackBuildMod {
     QString name;
@@ -46,6 +44,6 @@ struct PackBuild {
     QList<PackBuildMod> mods;
 };
 
-Result<> loadPackBuild(PackBuild& v, const QJsonObject& obj);
+void loadPackBuild(PackBuild& v, QJsonObject& obj);
 
 }  // namespace TechnicSolder

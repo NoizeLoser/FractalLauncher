@@ -12,7 +12,6 @@
 #include <QSpinBox>
 #include <QToolButton>
 #include <QVBoxLayout>
-#include <algorithm>
 
 #include "DesktopServices.h"
 #include "FileSystem.h"
@@ -22,7 +21,6 @@
 #include "java/JavaInstallList.h"
 #include "java/JavaUtils.h"
 
-#include "settings/SettingsObject.h"
 #include "ui/dialogs/CustomMessageBox.h"
 #include "ui/java/InstallJavaDialog.h"
 #include "ui/widgets/VersionSelectWidget.h"
@@ -31,13 +29,14 @@
 #include "BuildConfig.h"
 #include "HardwareInfo.h"
 
-JavaWizardWidget::JavaWizardWidget(QWidget* parent)
-    : QWidget(parent), m_availableMemory(HardwareInfo::totalRamMiB()), m_memoryTimer(new QTimer(this))
+JavaWizardWidget::JavaWizardWidget(QWidget* parent) : QWidget(parent)
 {
-    m_goodIcon = QIcon::fromTheme("status-good");
-    m_yellowIcon = QIcon::fromTheme("status-yellow");
-    m_badIcon = QIcon::fromTheme("status-bad");
+    m_availableMemory = HardwareInfo::totalRamMiB();
 
+    goodIcon = QIcon::fromTheme("status-good");
+    yellowIcon = QIcon::fromTheme("status-yellow");
+    badIcon = QIcon::fromTheme("status-bad");
+    m_memoryTimer = new QTimer(this);
     setupUi();
 
     connect(m_minMemSpinBox, &QSpinBox::valueChanged, this, &JavaWizardWidget::onSpinBoxValueChanged);
@@ -74,18 +73,18 @@ void JavaWizardWidget::setupUi()
     m_horizontalLayout->addWidget(m_javaBrowseBtn);
 
     m_javaStatusBtn = new QToolButton(this);
-    m_javaStatusBtn->setIcon(m_yellowIcon);
+    m_javaStatusBtn->setIcon(yellowIcon);
     m_horizontalLayout->addWidget(m_javaStatusBtn);
 
     m_memoryGroupBox = new QGroupBox(this);
     m_memoryGroupBox->setObjectName(QStringLiteral("memoryGroupBox"));
-    m_gridLayout2 = new QGridLayout(m_memoryGroupBox);
-    m_gridLayout2->setObjectName(QStringLiteral("gridLayout_2"));
-    m_gridLayout2->setColumnStretch(0, 1);
+    m_gridLayout_2 = new QGridLayout(m_memoryGroupBox);
+    m_gridLayout_2->setObjectName(QStringLiteral("gridLayout_2"));
+    m_gridLayout_2->setColumnStretch(0, 1);
 
     m_labelMinMem = new QLabel(m_memoryGroupBox);
     m_labelMinMem->setObjectName(QStringLiteral("labelMinMem"));
-    m_gridLayout2->addWidget(m_labelMinMem, 0, 0, 1, 1);
+    m_gridLayout_2->addWidget(m_labelMinMem, 0, 0, 1, 1);
 
     m_minMemSpinBox = new QSpinBox(m_memoryGroupBox);
     m_minMemSpinBox->setObjectName(QStringLiteral("minMemSpinBox"));
@@ -94,11 +93,11 @@ void JavaWizardWidget::setupUi()
     m_minMemSpinBox->setMaximum(1048576);
     m_minMemSpinBox->setSingleStep(128);
     m_labelMinMem->setBuddy(m_minMemSpinBox);
-    m_gridLayout2->addWidget(m_minMemSpinBox, 0, 1, 1, 1);
+    m_gridLayout_2->addWidget(m_minMemSpinBox, 0, 1, 1, 1);
 
     m_labelMaxMem = new QLabel(m_memoryGroupBox);
     m_labelMaxMem->setObjectName(QStringLiteral("labelMaxMem"));
-    m_gridLayout2->addWidget(m_labelMaxMem, 1, 0, 1, 1);
+    m_gridLayout_2->addWidget(m_labelMaxMem, 1, 0, 1, 1);
 
     m_maxMemSpinBox = new QSpinBox(m_memoryGroupBox);
     m_maxMemSpinBox->setObjectName(QStringLiteral("maxMemSpinBox"));
@@ -107,16 +106,16 @@ void JavaWizardWidget::setupUi()
     m_maxMemSpinBox->setMaximum(1048576);
     m_maxMemSpinBox->setSingleStep(128);
     m_labelMaxMem->setBuddy(m_maxMemSpinBox);
-    m_gridLayout2->addWidget(m_maxMemSpinBox, 1, 1, 1, 1);
+    m_gridLayout_2->addWidget(m_maxMemSpinBox, 1, 1, 1, 1);
 
     m_labelMaxMemIcon = new QLabel(m_memoryGroupBox);
     m_labelMaxMemIcon->setObjectName(QStringLiteral("labelMaxMemIcon"));
-    m_gridLayout2->addWidget(m_labelMaxMemIcon, 1, 2, 1, 1);
+    m_gridLayout_2->addWidget(m_labelMaxMemIcon, 1, 2, 1, 1);
 
     m_labelPermGen = new QLabel(m_memoryGroupBox);
     m_labelPermGen->setObjectName(QStringLiteral("labelPermGen"));
     m_labelPermGen->setText(QStringLiteral("PermGen:"));
-    m_gridLayout2->addWidget(m_labelPermGen, 2, 0, 1, 1);
+    m_gridLayout_2->addWidget(m_labelPermGen, 2, 0, 1, 1);
     m_labelPermGen->setVisible(false);
 
     m_permGenSpinBox = new QSpinBox(m_memoryGroupBox);
@@ -125,7 +124,7 @@ void JavaWizardWidget::setupUi()
     m_permGenSpinBox->setMinimum(4);
     m_permGenSpinBox->setMaximum(1048576);
     m_permGenSpinBox->setSingleStep(8);
-    m_gridLayout2->addWidget(m_permGenSpinBox, 2, 1, 1, 1);
+    m_gridLayout_2->addWidget(m_permGenSpinBox, 2, 1, 1, 1);
     m_permGenSpinBox->setVisible(false);
 
     m_verticalLayout->addWidget(m_memoryGroupBox);
@@ -140,27 +139,26 @@ void JavaWizardWidget::setupUi()
 
     m_autoJavaGroupBox = new QGroupBox(this);
     m_autoJavaGroupBox->setObjectName(QStringLiteral("autoJavaGroupBox"));
-    m_verticalJavaLayout = new QVBoxLayout(m_autoJavaGroupBox);
-    m_verticalJavaLayout->setObjectName(QStringLiteral("verticalJavaLayout"));
+    m_veriticalJavaLayout = new QVBoxLayout(m_autoJavaGroupBox);
+    m_veriticalJavaLayout->setObjectName(QStringLiteral("veriticalJavaLayout"));
 
     m_autodetectJavaCheckBox = new QCheckBox(m_autoJavaGroupBox);
     m_autodetectJavaCheckBox->setObjectName("autodetectJavaCheckBox");
     m_autodetectJavaCheckBox->setChecked(true);
-    m_verticalJavaLayout->addWidget(m_autodetectJavaCheckBox);
+    m_veriticalJavaLayout->addWidget(m_autodetectJavaCheckBox);
 
     if (BuildConfig.JAVA_DOWNLOADER_ENABLED) {
         m_autodownloadCheckBox = new QCheckBox(m_autoJavaGroupBox);
         m_autodownloadCheckBox->setObjectName("autodownloadCheckBox");
         m_autodownloadCheckBox->setEnabled(m_autodetectJavaCheckBox->isChecked());
-        m_verticalJavaLayout->addWidget(m_autodownloadCheckBox);
-        connect(m_autodetectJavaCheckBox, &QCheckBox::checkStateChanged, this, [this] {
+        m_veriticalJavaLayout->addWidget(m_autodownloadCheckBox);
+        connect(m_autodetectJavaCheckBox, &QCheckBox::stateChanged, this, [this] {
             m_autodownloadCheckBox->setEnabled(m_autodetectJavaCheckBox->isChecked());
-            if (!m_autodetectJavaCheckBox->isChecked()) {
+            if (!m_autodetectJavaCheckBox->isChecked())
                 m_autodownloadCheckBox->setChecked(false);
-            }
         });
 
-        connect(m_autodownloadCheckBox, &QCheckBox::checkStateChanged, this, [this] {
+        connect(m_autodownloadCheckBox, &QCheckBox::stateChanged, this, [this] {
             auto isChecked = m_autodownloadCheckBox->isChecked();
             m_versionWidget->setVisible(!isChecked);
             m_javaStatusBtn->setVisible(!isChecked);
@@ -190,14 +188,14 @@ void JavaWizardWidget::initialize()
     m_versionWidget->initialize(APPLICATION->javalist());
     m_versionWidget->selectSearch();
     m_versionWidget->setResizeOn(2);
-    auto* s = APPLICATION->settings();
+    auto s = APPLICATION->settings();
     // Memory
-    m_observedMinMemory = s->get("MinMemAlloc").toInt();
-    m_observedMaxMemory = s->get("MaxMemAlloc").toInt();
-    m_observedPermGenMemory = s->get("PermGen").toInt();
-    m_minMemSpinBox->setValue(static_cast<int>(m_observedMinMemory));
-    m_maxMemSpinBox->setValue(static_cast<int>(m_observedMaxMemory));
-    m_permGenSpinBox->setValue(static_cast<int>(m_observedPermGenMemory));
+    observedMinMemory = s->get("MinMemAlloc").toInt();
+    observedMaxMemory = s->get("MaxMemAlloc").toInt();
+    observedPermGenMemory = s->get("PermGen").toInt();
+    m_minMemSpinBox->setValue(observedMinMemory);
+    m_maxMemSpinBox->setValue(observedMaxMemory);
+    m_permGenSpinBox->setValue(observedPermGenMemory);
     updateThresholds();
     if (BuildConfig.JAVA_DOWNLOADER_ENABLED) {
         m_autodownloadCheckBox->setChecked(true);
@@ -283,12 +281,20 @@ QString JavaWizardWidget::javaPath() const
 
 int JavaWizardWidget::maxHeapSize() const
 {
-    return std::max(m_minMemSpinBox->value(), m_maxMemSpinBox->value());
+    auto min = m_minMemSpinBox->value();
+    auto max = m_maxMemSpinBox->value();
+    if (max < min)
+        max = min;
+    return max;
 }
 
 int JavaWizardWidget::minHeapSize() const
 {
-    return std::min(m_minMemSpinBox->value(), m_maxMemSpinBox->value());
+    auto min = m_minMemSpinBox->value();
+    auto max = m_maxMemSpinBox->value();
+    if (min > max)
+        min = max;
+    return min;
 }
 
 bool JavaWizardWidget::permGenEnabled() const
@@ -307,16 +313,16 @@ void JavaWizardWidget::memoryValueChanged()
     unsigned int min = m_minMemSpinBox->value();
     unsigned int max = m_maxMemSpinBox->value();
     unsigned int permgen = m_permGenSpinBox->value();
-    if (min != m_observedMinMemory) {
-        m_observedMinMemory = min;
+    if (min != observedMinMemory) {
+        observedMinMemory = min;
         actuallyChanged = true;
     }
-    if (max != m_observedMaxMemory) {
-        m_observedMaxMemory = max;
+    if (max != observedMaxMemory) {
+        observedMaxMemory = max;
         actuallyChanged = true;
     }
-    if (permgen != m_observedPermGenMemory) {
-        m_observedPermGenMemory = permgen;
+    if (permgen != observedPermGenMemory) {
+        observedPermGenMemory = permgen;
         actuallyChanged = true;
     }
     if (actuallyChanged) {
@@ -325,7 +331,7 @@ void JavaWizardWidget::memoryValueChanged()
     }
 }
 
-void JavaWizardWidget::javaVersionSelected(const BaseVersion::Ptr& version)
+void JavaWizardWidget::javaVersionSelected(BaseVersion::Ptr version)
 {
     auto java = std::dynamic_pointer_cast<JavaInstall>(version);
     if (!java) {
@@ -341,18 +347,18 @@ void JavaWizardWidget::javaVersionSelected(const BaseVersion::Ptr& version)
 void JavaWizardWidget::on_javaBrowseBtn_clicked()
 {
     auto filter = QString("Java (%1)").arg(JavaUtils::javaExecutable);
-    auto rawPath = QFileDialog::getOpenFileName(this, tr("Find Java executable"), QString(), filter);
-    if (rawPath.isEmpty()) {
+    auto raw_path = QFileDialog::getOpenFileName(this, tr("Find Java executable"), QString(), filter);
+    if (raw_path.isEmpty()) {
         return;
     }
-    auto cookedPath = FS::NormalizePath(rawPath);
-    m_javaPathTextBox->setText(cookedPath);
-    checkJavaPath(cookedPath);
+    auto cooked_path = FS::NormalizePath(raw_path);
+    m_javaPathTextBox->setText(cooked_path);
+    checkJavaPath(cooked_path);
 }
 
 void JavaWizardWidget::javaDownloadBtn_clicked()
 {
-    auto* jdialog = new Java::InstallDialog({}, nullptr, this);
+    auto jdialog = new Java::InstallDialog({}, nullptr, this);
     jdialog->exec();
 }
 
@@ -408,14 +414,14 @@ void JavaWizardWidget::setJavaStatus(JavaWizardWidget::JavaStatus status)
     javaStatus = status;
     switch (javaStatus) {
         case JavaStatus::Good:
-            m_javaStatusBtn->setIcon(m_goodIcon);
+            m_javaStatusBtn->setIcon(goodIcon);
             break;
         case JavaStatus::NotSet:
         case JavaStatus::Pending:
-            m_javaStatusBtn->setIcon(m_yellowIcon);
+            m_javaStatusBtn->setIcon(yellowIcon);
             break;
         default:
-            m_javaStatusBtn->setIcon(m_badIcon);
+            m_javaStatusBtn->setIcon(badIcon);
             break;
     }
 }
@@ -441,7 +447,7 @@ void JavaWizardWidget::checkJavaPathOnEdit(const QString& path)
 void JavaWizardWidget::checkJavaPath(const QString& path)
 {
     if (m_checker) {
-        m_queuedCheck = path;
+        queuedCheck = path;
         return;
     }
     auto realPath = FS::ResolveExecutable(path);
@@ -475,9 +481,9 @@ void JavaWizardWidget::checkFinished(const JavaChecker::Result& result)
     }
     updateThresholds();
     m_checker.reset();
-    if (!m_queuedCheck.isNull()) {
-        checkJavaPath(m_queuedCheck);
-        m_queuedCheck.clear();
+    if (!queuedCheck.isNull()) {
+        checkJavaPath(queuedCheck);
+        queuedCheck.clear();
     }
 }
 
@@ -501,19 +507,19 @@ void JavaWizardWidget::updateThresholds()
 {
     QString iconName;
 
-    if (m_observedMaxMemory >= m_availableMemory) {
+    if (observedMaxMemory >= m_availableMemory) {
         iconName = "status-bad";
         m_labelMaxMemIcon->setToolTip(tr("Your maximum memory allocation exceeds your system memory capacity."));
-    } else if (static_cast<uint64_t>(m_observedMaxMemory) * 10 > m_availableMemory * 9) {
+    } else if (observedMaxMemory > (m_availableMemory * 0.9)) {
         iconName = "status-yellow";
         m_labelMaxMemIcon->setToolTip(tr("Your maximum memory allocation approaches your system memory capacity."));
-    } else if (m_observedMaxMemory < m_observedMinMemory) {
+    } else if (observedMaxMemory < observedMinMemory) {
         iconName = "status-yellow";
         m_labelMaxMemIcon->setToolTip(tr("Your maximum memory allocation is smaller than the minimum value"));
     } else if (BuildConfig.JAVA_DOWNLOADER_ENABLED && m_autodownloadCheckBox->isChecked()) {
         iconName = "status-good";
         m_labelMaxMemIcon->setToolTip("");
-    } else if (m_observedMaxMemory > 2048 && !m_result.is_64bit) {
+    } else if (observedMaxMemory > 2048 && !m_result.is_64bit) {
         iconName = "status-bad";
         m_labelMaxMemIcon->setToolTip(tr("You are exceeding the maximum allocation supported by 32-bit installations of Java."));
     } else {
@@ -531,7 +537,7 @@ void JavaWizardWidget::updateThresholds()
 
 bool JavaWizardWidget::autoDownloadJava() const
 {
-    return (m_autodownloadCheckBox != nullptr) && m_autodownloadCheckBox->isChecked();
+    return m_autodownloadCheckBox && m_autodownloadCheckBox->isChecked();
 }
 
 bool JavaWizardWidget::autoDetectJava() const
@@ -539,14 +545,12 @@ bool JavaWizardWidget::autoDetectJava() const
     return m_autodetectJavaCheckBox->isChecked();
 }
 
-void JavaWizardWidget::onSpinBoxValueChanged(int /*unused*/)
+void JavaWizardWidget::onSpinBoxValueChanged(int)
 {
     m_memoryTimer->start(500);
 }
 
 JavaWizardWidget::~JavaWizardWidget()
 {
-    // the spacer is owned by us, take it out of the layout so the layout doesn't delete it too
-    m_verticalLayout->removeItem(m_verticalSpacer);
     delete m_verticalSpacer;
-}
+};

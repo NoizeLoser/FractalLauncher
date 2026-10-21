@@ -22,39 +22,37 @@
 
 namespace TechnicSolder {
 
-Result<> loadPack(Pack& v, const QJsonObject& obj)
+void loadPack(Pack& v, QJsonObject& obj)
 {
-    TRY_INTO(v.recommended, Json::requireString(obj, "recommended"))
-    TRY_INTO(v.latest, Json::requireString(obj, "latest"))
+    v.recommended = Json::requireString(obj, "recommended");
+    v.latest = Json::requireString(obj, "latest");
 
-    TRY_INTO(const auto& builds, Json::requireArray(obj, "builds"))
+    auto builds = Json::requireArray(obj, "builds");
     for (const auto buildRaw : builds) {
-        TRY_INTO(const auto& build, Json::requireString(buildRaw))
+        auto build = Json::requireString(buildRaw);
         v.builds.append(build);
     }
-    return {};
 }
 
-static Result<> loadPackBuildMod(PackBuildMod& b, const QJsonObject& obj)
+static void loadPackBuildMod(PackBuildMod& b, QJsonObject& obj)
 {
-    TRY_INTO(b.name, Json::requireString(obj, "name"))
+    b.name = Json::requireString(obj, "name");
     b.version = obj["version"].toString("");
-    TRY_INTO(b.md5, Json::requireString(obj, "md5"))
-    TRY_INTO(b.url, Json::requireString(obj, "url"))
-    return {};
+    b.md5 = Json::requireString(obj, "md5");
+    b.url = Json::requireString(obj, "url");
 }
 
-Result<> loadPackBuild(PackBuild& v, const QJsonObject& obj)
+void loadPackBuild(PackBuild& v, QJsonObject& obj)
 {
-    TRY_INTO(v.minecraft, Json::requireString(obj, "minecraft"))
+    v.minecraft = Json::requireString(obj, "minecraft");
 
-    TRY_INTO(const auto& mods, Json::requireArray(obj, "mods"))
+    auto mods = Json::requireArray(obj, "mods");
     for (const auto modRaw : mods) {
+        auto modObj = Json::requireObject(modRaw);
         PackBuildMod mod;
-        TRY(Json::requireObject(modRaw).and_then([&mod](const auto& v) { return loadPackBuildMod(mod, v); }))
+        loadPackBuildMod(mod, modObj);
         v.mods.append(mod);
     }
-    return {};
 }
 
 }  // namespace TechnicSolder

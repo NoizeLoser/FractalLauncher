@@ -44,46 +44,51 @@ using namespace Json;
 
 static const int CURRENT_MINIMUM_LAUNCHER_VERSION = 18;
 
-namespace {
-Result<QString> optionalString(const QJsonObject& root, const QString& key)
+static MojangAssetIndexInfo::Ptr assetIndexFromJson(const QJsonObject& obj);
+static MojangDownloadInfo::Ptr downloadInfoFromJson(const QJsonObject& obj);
+static MojangLibraryDownloadInfo::Ptr libDownloadInfoFromJson(const QJsonObject& libObj);
+static QJsonObject assetIndexToJson(MojangAssetIndexInfo::Ptr assetidxinfo);
+static QJsonObject libDownloadInfoToJson(MojangLibraryDownloadInfo::Ptr libinfo);
+static QJsonObject downloadInfoToJson(MojangDownloadInfo::Ptr info);
+
+namespace Bits {
+static void readString(const QJsonObject& root, const QString& key, QString& variable)
 {
     if (root.contains(key)) {
-        return requireString(root.value(key));
+        variable = requireString(root.value(key));
     }
-    return {};
 }
 
-Result<> readDownloadInfo(MojangDownloadInfo::Ptr out, const QJsonObject& obj)
+static void readDownloadInfo(MojangDownloadInfo::Ptr out, const QJsonObject& obj)
 {
     // optional, not used
-    TRY_INTO(out->path, optionalString(obj, "path"))
+    readString(obj, "path", out->path);
     // required!
-    TRY_INTO(out->sha1, requireString(obj, "sha1"))
-    TRY_INTO(out->url, requireString(obj, "url"))
-    TRY_INTO(out->size, requireInteger(obj, "size"))
-    return {};
+    out->sha1 = requireString(obj, "sha1");
+    out->url = requireString(obj, "url");
+    out->size = requireInteger(obj, "size");
 }
 
-Result<> readAssetIndex(MojangAssetIndexInfo::Ptr out, const QJsonObject& obj)
+static void readAssetIndex(MojangAssetIndexInfo::Ptr out, const QJsonObject& obj)
 {
-    TRY_INTO(out->totalSize, requireInteger(obj, "totalSize"))
-    TRY_INTO(out->id, requireString(obj, "id"))
+    out->totalSize = requireInteger(obj, "totalSize");
+    out->id = requireString(obj, "id");
     // out->known = true;
-    return {};
 }
+}  // namespace Bits
 
-Result<MojangDownloadInfo::Ptr> downloadInfoFromJson(const QJsonObject& obj)
+MojangDownloadInfo::Ptr downloadInfoFromJson(const QJsonObject& obj)
 {
     auto out = std::make_shared<MojangDownloadInfo>();
-    TRY(readDownloadInfo(out, obj))
+    Bits::readDownloadInfo(out, obj);
     return out;
 }
 
-Result<MojangAssetIndexInfo::Ptr> assetIndexFromJson(const QJsonObject& obj)
+MojangAssetIndexInfo::Ptr assetIndexFromJson(const QJsonObject& obj)
 {
     auto out = std::make_shared<MojangAssetIndexInfo>();
-    TRY(readDownloadInfo(out, obj))
-    TRY(readAssetIndex(out, obj))
+    Bits::readDownloadInfo(out, obj);
+    Bits::readAssetIndex(out, obj);
     return out;
 }
 
@@ -99,18 +104,19 @@ QJsonObject downloadInfoToJson(MojangDownloadInfo::Ptr info)
     return out;
 }
 
-Result<MojangLibraryDownloadInfo::Ptr> libDownloadInfoFromJson(const QJsonObject& libObj)
+MojangLibraryDownloadInfo::Ptr libDownloadInfoFromJson(const QJsonObject& libObj)
 {
     auto out = std::make_shared<MojangLibraryDownloadInfo>();
-    TRY_INTO(const auto& dlObj, requireObject(libObj.value("downloads")))
+    auto dlObj = requireObject(libObj.value("downloads"));
     if (dlObj.contains("artifact")) {
-        TRY_INTO(out->artifact, requireObject(dlObj, "artifact").and_then(downloadInfoFromJson))
+        out->artifact = downloadInfoFromJson(requireObject(dlObj, "artifact"));
     }
     if (dlObj.contains("classifiers")) {
-        TRY_INTO(const auto& classifiersObj, requireObject(dlObj, "classifiers"))
+        auto classifiersObj = requireObject(dlObj, "classifiers");
         for (auto iter = classifiersObj.begin(); iter != classifiersObj.end(); iter++) {
             auto classifier = iter.key();
-            TRY_INTO(out->classifiers[classifier], requireObject(iter.value()).and_then(downloadInfoFromJson))
+            auto classifierObj = requireObject(iter.value());
+            out->classifiers[classifier] = downloadInfoFromJson(classifierObj);
         }
     }
     return out;
@@ -145,18 +151,17 @@ QJsonObject assetIndexToJson(MojangAssetIndexInfo::Ptr info)
     out.insert("id", info->id);
     return out;
 }
-}  // namespace
 
-Result<> MojangVersionFormat::readVersionProperties(const QJsonObject& in, VersionFile* out)
+void MojangVersionFormat::readVersionProperties(const QJsonObject& in, VersionFile* out)
 {
-    TRY_INTO(out->minecraftVersion, optionalString(in, "id"))
-    TRY_INTO(out->mainClass, optionalString(in, "mainClass"))
-    TRY_INTO(out->minecraftArguments, optionalString(in, "minecraftArguments"))
-    TRY_INTO(out->type, optionalString(in, "type"))
+    Bits::readString(in, "id", out->minecraftVersion);
+    Bits::readString(in, "mainClass", out->mainClass);
+    Bits::readString(in, "minecraftArguments", out->minecraftArguments);
+    Bits::readString(in, "type", out->type);
 
-    TRY_INTO(out->assets, optionalString(in, "assets"))
+    Bits::readString(in, "assets", out->assets);
     if (in.contains("assetIndex")) {
-        TRY_INTO(out->mojangAssetIndex, requireObject(in, "assetIndex").and_then(assetIndexFromJson))
+        out->mojangAssetIndex = assetIndexFromJson(requireObject(in, "assetIndex"));
     } else if (!out->assets.isNull()) {
         out->mojangAssetIndex = std::make_shared<MojangAssetIndexInfo>(out->assets);
     }
@@ -165,7 +170,7 @@ Result<> MojangVersionFormat::readVersionProperties(const QJsonObject& in, Versi
     out->updateTime = timeFromS3Time(in.value("time").toString(""));
 
     if (in.contains("minimumLauncherVersion")) {
-        TRY_INTO(out->minimumLauncherVersion, requireInteger(in.value("minimumLauncherVersion")))
+        out->minimumLauncherVersion = requireInteger(in.value("minimumLauncherVersion"));
         if (out->minimumLauncherVersion > CURRENT_MINIMUM_LAUNCHER_VERSION) {
             out->addProblem(ProblemSeverity::Warning, QObject::tr("The 'minimumLauncherVersion' value of this version (%1) is higher than "
                                                                   "supported by %3 (%2). It might not work properly!")
@@ -176,39 +181,37 @@ Result<> MojangVersionFormat::readVersionProperties(const QJsonObject& in, Versi
     }
 
     if (in.contains("compatibleJavaMajors")) {
-        TRY_INTO(const auto& arr, requireArray(in.value("compatibleJavaMajors")))
-        for (auto compatible : arr) {
-            TRY_INTO(const auto& major, requireInteger(compatible))
-            out->compatibleJavaMajors.append(major);
+        for (auto compatible : requireArray(in.value("compatibleJavaMajors"))) {
+            out->compatibleJavaMajors.append(requireInteger(compatible));
         }
     }
     if (in.contains("compatibleJavaName")) {
-        TRY_INTO(out->compatibleJavaName, requireString(in.value("compatibleJavaName")))
+        out->compatibleJavaName = requireString(in.value("compatibleJavaName"));
     }
 
     if (in.contains("downloads")) {
-        TRY_INTO(const auto& downloadsObj, requireObject(in, "downloads"))
+        auto downloadsObj = requireObject(in, "downloads");
         for (auto iter = downloadsObj.begin(); iter != downloadsObj.end(); iter++) {
             auto classifier = iter.key();
-            TRY_INTO(out->mojangDownloads[classifier], requireObject(iter.value()).and_then(downloadInfoFromJson))
+            auto classifierObj = requireObject(iter.value());
+            out->mojangDownloads[classifier] = downloadInfoFromJson(classifierObj);
         }
     }
-    return {};
 }
 
-Result<VersionFilePtr> MojangVersionFormat::versionFileFromJson(const QJsonDocument& doc, const QString& filename)
+VersionFilePtr MojangVersionFormat::versionFileFromJson(const QJsonDocument& doc, const QString& filename)
 {
     VersionFilePtr out(new VersionFile());
     if (doc.isEmpty() || doc.isNull()) {
-        return std::unexpected(filename + " is empty or null");
+        throw JSONValidationError(filename + " is empty or null");
     }
     if (!doc.isObject()) {
-        return std::unexpected(filename + " is not an object");
+        throw JSONValidationError(filename + " is not an object");
     }
 
     QJsonObject root = doc.object();
 
-    TRY(readVersionProperties(root, out.get()))
+    readVersionProperties(root, out.get());
 
     out->name = "Minecraft";
     out->uid = "net.minecraft";
@@ -216,12 +219,11 @@ Result<VersionFilePtr> MojangVersionFormat::versionFileFromJson(const QJsonDocum
     // out->filename = filename;
 
     if (root.contains("libraries")) {
-        TRY_INTO(const auto& libs, requireArray(root.value("libraries")))
-        for (auto libVal : libs) {
-            TRY_INTO(const auto& libObj, requireObject(libVal).and_then([&out, filename](const auto& v) {
-                return MojangVersionFormat::libraryFromJson(*out, v, filename);
-            }))
-            out->libraries.append(libObj);
+        for (auto libVal : requireArray(root.value("libraries"))) {
+            auto libObj = requireObject(libVal);
+
+            auto lib = MojangVersionFormat::libraryFromJson(*out, libObj, filename);
+            out->libraries.append(lib);
         }
     }
     return out;
@@ -285,11 +287,11 @@ QJsonDocument MojangVersionFormat::versionFileToJson(const VersionFilePtr& patch
     }
 }
 
-Result<LibraryPtr> MojangVersionFormat::libraryFromJson(ProblemContainer& problems, const QJsonObject& libObj, const QString& filename)
+LibraryPtr MojangVersionFormat::libraryFromJson(ProblemContainer& problems, const QJsonObject& libObj, const QString& filename)
 {
     LibraryPtr out(new Library());
     if (!libObj.contains("name")) {
-        return std::unexpected(filename + " contains a library that doesn't have a 'name' field");
+        throw JSONValidationError(filename + "contains a library that doesn't have a 'name' field");
     }
     auto rawName = libObj.value("name").toString();
     out->m_name = rawName;
@@ -297,18 +299,16 @@ Result<LibraryPtr> MojangVersionFormat::libraryFromJson(ProblemContainer& proble
         problems.addProblem(ProblemSeverity::Error, QObject::tr("Library %1 name is broken and cannot be processed.").arg(rawName));
     }
 
-    TRY_INTO(out->m_repositoryURL, optionalString(libObj, "url"))
+    Bits::readString(libObj, "url", out->m_repositoryURL);
     if (libObj.contains("extract")) {
         out->m_hasExcludes = true;
-        TRY_INTO(const auto& extractObj,
-                 requireObject(libObj.value("extract")).and_then([](const auto& v) { return requireArray(v.value("exclude")); }))
-        for (auto excludeVal : extractObj) {
-            TRY_INTO(const auto& e, requireString(excludeVal))
-            out->m_extractExcludes.append(e);
+        auto extractObj = requireObject(libObj.value("extract"));
+        for (auto excludeVal : requireArray(extractObj.value("exclude"))) {
+            out->m_extractExcludes.append(requireString(excludeVal));
         }
     }
     if (libObj.contains("natives")) {
-        TRY_INTO(const auto& nativesObj, requireObject(libObj.value("natives")))
+        QJsonObject nativesObj = requireObject(libObj.value("natives"));
         for (auto it = nativesObj.begin(); it != nativesObj.end(); ++it) {
             if (!it.value().isString()) {
                 qWarning() << filename << "contains an invalid native (skipping)";
@@ -320,14 +320,13 @@ Result<LibraryPtr> MojangVersionFormat::libraryFromJson(ProblemContainer& proble
     if (libObj.contains("rules")) {
         out->applyRules = true;
 
-        TRY_INTO(const auto& rulesArray, requireArray(libObj.value("rules")))
+        QJsonArray rulesArray = requireArray(libObj.value("rules"));
         for (auto rule : rulesArray) {
-            TRY_INTO(const auto& r, requireObject(rule))
-            out->m_rules.append(Rule::fromJson(r));
+            out->m_rules.append(Rule::fromJson(requireObject(rule)));
         }
     }
     if (libObj.contains("downloads")) {
-        TRY_INTO(out->m_mojangDownloads, libDownloadInfoFromJson(libObj))
+        out->m_mojangDownloads = libDownloadInfoFromJson(libObj);
     }
     return out;
 }

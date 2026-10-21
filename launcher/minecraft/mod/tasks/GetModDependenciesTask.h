@@ -21,6 +21,7 @@
 #include <QDir>
 #include <QList>
 #include <QVariant>
+#include <functional>
 #include <memory>
 #include <utility>
 
@@ -48,23 +49,22 @@ class GetModDependenciesTask : public SequentialTask {
     };
 
     struct PackDependencyExtraInfo {
-        bool maybeInstalled{};
-        QStringList requiredByNames;
-        QStringList requiredByIds;
+        bool maybe_installed{};
+        QStringList required_by;
     };
 
-    explicit GetModDependenciesTask(MinecraftInstance* instance, ModFolderModel* folder, QList<std::shared_ptr<PackDependency>> selected);
+    explicit GetModDependenciesTask(BaseInstance* instance, ModFolderModel* folder, QList<std::shared_ptr<PackDependency>> selected);
 
-    auto getDependecies() const -> QList<std::shared_ptr<PackDependency>> { return m_packDependencies; }
+    auto getDependecies() const -> QList<std::shared_ptr<PackDependency>> { return m_pack_dependencies; }
     QHash<QString, PackDependencyExtraInfo> getExtraInfo();
 
    private:
-    static const ResourceAPI* getAPI(ModPlatform::ResourceProvider provider)
+    ResourceAPI* getAPI(ModPlatform::ResourceProvider provider)
     {
         if (provider == ModPlatform::ResourceProvider::FLAME) {
-            return &FlameAPI::get();
+            return &m_flameAPI;
         }
-        return &ModrinthAPI::get();
+        return &m_modrinthAPI;
     }
 
    protected slots:
@@ -72,19 +72,22 @@ class GetModDependenciesTask : public SequentialTask {
     QList<ModPlatform::Dependency> getDependenciesForVersion(const ModPlatform::IndexedVersion&,
                                                              ModPlatform::ResourceProvider providerName);
     void prepare();
-    Task::Ptr getProjectInfoTask(const std::shared_ptr<PackDependency>& pDep);
+    Task::Ptr getProjectInfoTask(std::shared_ptr<PackDependency> pDep);
     ModPlatform::Dependency getOverride(const ModPlatform::Dependency&, ModPlatform::ResourceProvider providerName);
     void removePack(const QVariant& addonId);
 
-    bool isLocalyInstalled(const std::shared_ptr<PackDependency>& pDep);
-    bool maybeInstalled(const std::shared_ptr<PackDependency>& pDep);
+    bool isLocalyInstalled(std::shared_ptr<PackDependency> pDep);
+    bool maybeInstalled(std::shared_ptr<PackDependency> pDep);
 
    private:
-    QList<std::shared_ptr<PackDependency>> m_packDependencies;
+    QList<std::shared_ptr<PackDependency>> m_pack_dependencies;
     QList<std::shared_ptr<Metadata::ModStruct>> m_mods;
     QList<std::shared_ptr<PackDependency>> m_selected;
-    QStringList m_modsFileNames;
+    QStringList m_mods_file_names;
 
     Version m_version;
     ModPlatform::ModLoaderTypes m_loaderType;
+
+    ModrinthAPI m_modrinthAPI;
+    FlameAPI m_flameAPI;
 };

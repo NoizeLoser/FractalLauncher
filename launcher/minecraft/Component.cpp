@@ -222,10 +222,12 @@ bool Component::isMoveable()
     return true;
 }
 
-bool Component::isVersionChangeable() const
+bool Component::isVersionChangeable(bool wait)
 {
     auto list = getVersionList();
     if (list) {
+        if (wait)
+            list->waitToLoad();
         return list->count() != 0;
     }
     return false;
@@ -335,22 +337,27 @@ bool Component::customize()
     if (!FS::ensureFilePathExists(filename)) {
         return false;
     }
-    QSaveFile jsonFile(filename);
-    if (!jsonFile.open(QIODevice::WriteOnly)) {
-        return false;
+    // FIXME: get rid of this try-catch.
+    try {
+        QSaveFile jsonFile(filename);
+        if (!jsonFile.open(QIODevice::WriteOnly)) {
+            return false;
+        }
+        auto vfile = getVersionFile();
+        if (!vfile) {
+            return false;
+        }
+        auto document = OneSixVersionFormat::versionFileToJson(vfile);
+        jsonFile.write(document.toJson());
+        if (!jsonFile.commit()) {
+            return false;
+        }
+        m_file = vfile;
+        m_metaVersion.reset();
+        emit dataChanged();
+    } catch (const Exception& error) {
+        qWarning() << "Version could not be loaded:" << error.cause();
     }
-    auto vfile = getVersionFile();
-    if (!vfile) {
-        return false;
-    }
-    auto document = OneSixVersionFormat::versionFileToJson(vfile);
-    jsonFile.write(document.toJson());
-    if (!jsonFile.commit()) {
-        return false;
-    }
-    m_file = vfile;
-    m_metaVersion.reset();
-    emit dataChanged();
     return true;
 }
 

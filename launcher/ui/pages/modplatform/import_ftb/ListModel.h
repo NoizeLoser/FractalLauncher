@@ -29,13 +29,13 @@ namespace FTBImportAPP {
 class FilterModel : public QSortFilterProxyModel {
     Q_OBJECT
    public:
-    explicit FilterModel(QObject* parent = nullptr);
-    enum Sorting : std::uint8_t { ByName, ByGameVersion };
-    QMap<QString, Sorting> getAvailableSortings();
+    FilterModel(QObject* parent = Q_NULLPTR);
+    enum Sorting { ByName, ByGameVersion };
+    const QMap<QString, Sorting> getAvailableSortings();
     QString translateCurrentSorting();
     void setSorting(Sorting sorting);
     Sorting getCurrentSorting();
-    void setSearchTerm(const QString& term);
+    void setSearchTerm(QString term);
 
    protected:
     bool filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const override;
@@ -51,20 +51,20 @@ class ListModel : public QAbstractListModel {
     Q_OBJECT
 
    public:
-    explicit ListModel(QObject* parent);
-    ~ListModel() override = default;
+    ListModel(QObject* parent);
+    virtual ~ListModel() = default;
 
-    int rowCount(const QModelIndex& /*parent*/) const override { return static_cast<int>(m_modpacks.size()); }
-    int columnCount(const QModelIndex& /*parent*/) const override { return 1; }
-    QVariant data(const QModelIndex& index, int role) const override;
+    int rowCount(const QModelIndex& parent) const { return m_modpacks.size(); }
+    int columnCount(const QModelIndex& parent) const { return 1; }
+    QVariant data(const QModelIndex& index, int role) const;
 
     void update();
 
     QString getUserPath();
-    void setPath(const QString& path);
+    void setPath(QString path);
 
    private:
     ModpackList m_modpacks;
-    const QString m_instancesPath;
+    const QString m_instances_path;
 };
 }  // namespace FTBImportAPP

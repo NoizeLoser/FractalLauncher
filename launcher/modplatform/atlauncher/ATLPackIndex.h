@@ -41,7 +41,7 @@ struct IndexedPack {
     QString safeName;
 };
 
-Result<> loadIndexedPack(IndexedPack& m, QJsonObject& obj);
+void loadIndexedPack(IndexedPack& m, QJsonObject& obj);
 }  // namespace ATLauncher
 
 Q_DECLARE_METATYPE(ATLauncher::IndexedPack)

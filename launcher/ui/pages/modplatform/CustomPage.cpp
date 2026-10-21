@@ -37,7 +37,6 @@
 #include "ui_CustomPage.h"
 
 #include <QTabBar>
-#include <utility>
 
 #include "Application.h"
 #include "Filter.h"
@@ -47,33 +46,33 @@
 #include "minecraft/VanillaInstanceCreationTask.h"
 #include "ui/dialogs/NewInstanceDialog.h"
 
-CustomPage::CustomPage(NewInstanceDialog* dialog, QWidget* parent) : QWidget(parent), m_dialog(dialog), m_ui(new Ui::CustomPage)
+CustomPage::CustomPage(NewInstanceDialog* dialog, QWidget* parent) : QWidget(parent), dialog(dialog), ui(new Ui::CustomPage)
 {
-    m_ui->setupUi(this);
-    connect(m_ui->versionList, &VersionSelectWidget::selectedVersionChanged, this, &CustomPage::setSelectedVersion);
+    ui->setupUi(this);
+    connect(ui->versionList, &VersionSelectWidget::selectedVersionChanged, this, &CustomPage::setSelectedVersion);
     filterChanged();
-    connect(m_ui->alphaFilter, &QCheckBox::checkStateChanged, this, &CustomPage::filterChanged);
-    connect(m_ui->betaFilter, &QCheckBox::checkStateChanged, this, &CustomPage::filterChanged);
-    connect(m_ui->snapshotFilter, &QCheckBox::checkStateChanged, this, &CustomPage::filterChanged);
-    connect(m_ui->releaseFilter, &QCheckBox::checkStateChanged, this, &CustomPage::filterChanged);
-    connect(m_ui->experimentsFilter, &QCheckBox::checkStateChanged, this, &CustomPage::filterChanged);
-    connect(m_ui->refreshBtn, &QPushButton::clicked, this, &CustomPage::refresh);
+    connect(ui->alphaFilter, &QCheckBox::stateChanged, this, &CustomPage::filterChanged);
+    connect(ui->betaFilter, &QCheckBox::stateChanged, this, &CustomPage::filterChanged);
+    connect(ui->snapshotFilter, &QCheckBox::stateChanged, this, &CustomPage::filterChanged);
+    connect(ui->releaseFilter, &QCheckBox::stateChanged, this, &CustomPage::filterChanged);
+    connect(ui->experimentsFilter, &QCheckBox::stateChanged, this, &CustomPage::filterChanged);
+    connect(ui->refreshBtn, &QPushButton::clicked, this, &CustomPage::refresh);
 
-    connect(m_ui->loaderVersionList, &VersionSelectWidget::selectedVersionChanged, this, &CustomPage::setSelectedLoaderVersion);
-    connect(m_ui->noneFilter, &QRadioButton::toggled, this, &CustomPage::loaderFilterChanged);
-    connect(m_ui->forgeFilter, &QRadioButton::toggled, this, &CustomPage::loaderFilterChanged);
-    connect(m_ui->fabricFilter, &QRadioButton::toggled, this, &CustomPage::loaderFilterChanged);
-    connect(m_ui->quiltFilter, &QRadioButton::toggled, this, &CustomPage::loaderFilterChanged);
-    connect(m_ui->liteLoaderFilter, &QRadioButton::toggled, this, &CustomPage::loaderFilterChanged);
-    connect(m_ui->loaderRefreshBtn, &QPushButton::clicked, this, &CustomPage::loaderRefresh);
+    connect(ui->loaderVersionList, &VersionSelectWidget::selectedVersionChanged, this, &CustomPage::setSelectedLoaderVersion);
+    connect(ui->noneFilter, &QRadioButton::toggled, this, &CustomPage::loaderFilterChanged);
+    connect(ui->forgeFilter, &QRadioButton::toggled, this, &CustomPage::loaderFilterChanged);
+    connect(ui->fabricFilter, &QRadioButton::toggled, this, &CustomPage::loaderFilterChanged);
+    connect(ui->quiltFilter, &QRadioButton::toggled, this, &CustomPage::loaderFilterChanged);
+    connect(ui->liteLoaderFilter, &QRadioButton::toggled, this, &CustomPage::loaderFilterChanged);
+    connect(ui->loaderRefreshBtn, &QPushButton::clicked, this, &CustomPage::loaderRefresh);
 }
 
 void CustomPage::openedImpl()
 {
-    if (!m_initialized) {
+    if (!initialized) {
         auto vlist = APPLICATION->metadataIndex()->get("net.minecraft");
-        m_ui->versionList->initialize(vlist.get());
-        m_initialized = true;
+        ui->versionList->initialize(vlist.get());
+        initialized = true;
     } else {
         suggestCurrent();
     }
@@ -81,37 +80,31 @@ void CustomPage::openedImpl()
 
 void CustomPage::refresh()
 {
-    m_ui->versionList->loadList(true);
+    ui->versionList->loadList(true);
 }
 
 void CustomPage::loaderRefresh()
 {
-    if (m_ui->noneFilter->isChecked()) {
+    if (ui->noneFilter->isChecked())
         return;
-    }
-    m_ui->loaderVersionList->loadList(true);
+    ui->loaderVersionList->loadList(true);
 }
 
 void CustomPage::filterChanged()
 {
     QStringList out;
-    if (m_ui->alphaFilter->isChecked()) {
+    if (ui->alphaFilter->isChecked())
         out << "(alpha)";
-    }
-    if (m_ui->betaFilter->isChecked()) {
+    if (ui->betaFilter->isChecked())
         out << "(beta)";
-    }
-    if (m_ui->snapshotFilter->isChecked()) {
+    if (ui->snapshotFilter->isChecked())
         out << "(snapshot)";
-    }
-    if (m_ui->releaseFilter->isChecked()) {
+    if (ui->releaseFilter->isChecked())
         out << "(release)";
-    }
-    if (m_ui->experimentsFilter->isChecked()) {
+    if (ui->experimentsFilter->isChecked())
         out << "(experiment)";
-    }
     auto regexp = out.join('|');
-    m_ui->versionList->setFilter(BaseVersionList::TypeRole, Filters::regexp(QRegularExpression(regexp)));
+    ui->versionList->setFilter(BaseVersionList::TypeRole, Filters::regexp(QRegularExpression(regexp)));
 }
 
 void CustomPage::loaderFilterChanged()
@@ -120,53 +113,50 @@ void CustomPage::loaderFilterChanged()
     if (m_selectedVersion) {
         minecraftVersion = m_selectedVersion->descriptor();
     } else {
-        m_ui->loaderVersionList->setExactFilter(BaseVersionList::ParentVersionRole, "AAA");  // empty list
-        m_ui->loaderVersionList->setEmptyString(tr("No Minecraft version is selected."));
-        m_ui->loaderVersionList->setEmptyMode(VersionListView::String);
+        ui->loaderVersionList->setExactFilter(BaseVersionList::ParentVersionRole, "AAA");  // empty list
+        ui->loaderVersionList->setEmptyString(tr("No Minecraft version is selected."));
+        ui->loaderVersionList->setEmptyMode(VersionListView::String);
         return;
     }
-    if (m_ui->noneFilter->isChecked()) {
-        m_ui->loaderVersionList->setExactFilter(BaseVersionList::ParentVersionRole, "AAA");  // empty list
-        m_ui->loaderVersionList->setEmptyString(tr("No mod loader is selected."));
-        m_ui->loaderVersionList->setEmptyMode(VersionListView::String);
+    if (ui->noneFilter->isChecked()) {
+        ui->loaderVersionList->setExactFilter(BaseVersionList::ParentVersionRole, "AAA");  // empty list
+        ui->loaderVersionList->setEmptyString(tr("No mod loader is selected."));
+        ui->loaderVersionList->setEmptyMode(VersionListView::String);
         return;
-    }
-    if (m_ui->neoForgeFilter->isChecked()) {
-        m_ui->loaderVersionList->setExactFilter(BaseVersionList::ParentVersionRole, minecraftVersion);
+    } else if (ui->neoForgeFilter->isChecked()) {
+        ui->loaderVersionList->setExactFilter(BaseVersionList::ParentVersionRole, minecraftVersion);
         m_selectedLoader = "net.neoforged";
-    } else if (m_ui->forgeFilter->isChecked()) {
-        m_ui->loaderVersionList->setExactFilter(BaseVersionList::ParentVersionRole, minecraftVersion);
+    } else if (ui->forgeFilter->isChecked()) {
+        ui->loaderVersionList->setExactFilter(BaseVersionList::ParentVersionRole, minecraftVersion);
         m_selectedLoader = "net.minecraftforge";
-    } else if (m_ui->fabricFilter->isChecked()) {
+    } else if (ui->fabricFilter->isChecked()) {
         // FIXME: dirty hack because the launcher is unaware of Fabric's dependencies
-        if (Version(minecraftVersion) >= Version("1.14")) {  // Fabric/Quilt supported
-            m_ui->loaderVersionList->setExactFilter(BaseVersionList::ParentVersionRole, "");
-        } else {                                                                                 // Fabric/Quilt unsupported
-            m_ui->loaderVersionList->setExactFilter(BaseVersionList::ParentVersionRole, "AAA");  // clear list
-        }
+        if (Version(minecraftVersion) >= Version("1.14"))  // Fabric/Quilt supported
+            ui->loaderVersionList->setExactFilter(BaseVersionList::ParentVersionRole, "");
+        else                                                                                   // Fabric/Quilt unsupported
+            ui->loaderVersionList->setExactFilter(BaseVersionList::ParentVersionRole, "AAA");  // clear list
         m_selectedLoader = "net.fabricmc.fabric-loader";
-    } else if (m_ui->quiltFilter->isChecked()) {
+    } else if (ui->quiltFilter->isChecked()) {
         // FIXME: dirty hack because the launcher is unaware of Quilt's dependencies (same as Fabric)
-        if (Version(minecraftVersion) >= Version("1.14")) {  // Fabric/Quilt supported
-            m_ui->loaderVersionList->setExactFilter(BaseVersionList::ParentVersionRole, "");
-        } else {                                                                                 // Fabric/Quilt unsupported
-            m_ui->loaderVersionList->setExactFilter(BaseVersionList::ParentVersionRole, "AAA");  // clear list
-        }
+        if (Version(minecraftVersion) >= Version("1.14"))  // Fabric/Quilt supported
+            ui->loaderVersionList->setExactFilter(BaseVersionList::ParentVersionRole, "");
+        else                                                                                   // Fabric/Quilt unsupported
+            ui->loaderVersionList->setExactFilter(BaseVersionList::ParentVersionRole, "AAA");  // clear list
         m_selectedLoader = "org.quiltmc.quilt-loader";
-    } else if (m_ui->liteLoaderFilter->isChecked()) {
-        m_ui->loaderVersionList->setExactFilter(BaseVersionList::ParentVersionRole, minecraftVersion);
+    } else if (ui->liteLoaderFilter->isChecked()) {
+        ui->loaderVersionList->setExactFilter(BaseVersionList::ParentVersionRole, minecraftVersion);
         m_selectedLoader = "com.mumfrey.liteloader";
     }
 
     auto vlist = APPLICATION->metadataIndex()->get(m_selectedLoader);
-    m_ui->loaderVersionList->initialize(vlist.get());
-    m_ui->loaderVersionList->selectRecommended();
-    m_ui->loaderVersionList->setEmptyString(tr("No versions are currently available for Minecraft %1").arg(minecraftVersion));
+    ui->loaderVersionList->initialize(vlist.get());
+    ui->loaderVersionList->selectRecommended();
+    ui->loaderVersionList->setEmptyString(tr("No versions are currently available for Minecraft %1").arg(minecraftVersion));
 }
 
 CustomPage::~CustomPage()
 {
-    delete m_ui;
+    delete ui;
 }
 
 bool CustomPage::shouldDisplay() const
@@ -176,7 +166,7 @@ bool CustomPage::shouldDisplay() const
 
 void CustomPage::retranslate()
 {
-    m_ui->retranslateUi(this);
+    ui->retranslateUi(this);
 }
 
 BaseVersion::Ptr CustomPage::selectedVersion() const
@@ -194,26 +184,6 @@ QString CustomPage::selectedLoader() const
     return m_selectedLoader;
 }
 
-QString CustomPage::selectedLoaderName() const
-{
-    if (m_ui->neoForgeFilter->isChecked()) {
-        return m_ui->neoForgeFilter->text();
-    }
-    if (m_ui->forgeFilter->isChecked()) {
-        return m_ui->forgeFilter->text();
-    }
-    if (m_ui->fabricFilter->isChecked()) {
-        return m_ui->fabricFilter->text();
-    }
-    if (m_ui->quiltFilter->isChecked()) {
-        return m_ui->quiltFilter->text();
-    }
-    if (m_ui->liteLoaderFilter->isChecked()) {
-        return m_ui->liteLoaderFilter->text();
-    }
-    return QString();
-}
-
 void CustomPage::suggestCurrent()
 {
     if (!isOpened) {
@@ -221,29 +191,29 @@ void CustomPage::suggestCurrent()
     }
 
     if (!m_selectedVersion) {
-        m_dialog->setSuggestedPack();
+        dialog->setSuggestedPack();
         return;
     }
 
     // There isn't a selected version if the version list is empty
-    if (m_ui->loaderVersionList->selectedVersion() == nullptr) {
-        m_dialog->setSuggestedPack(m_selectedVersion->descriptor(), new VanillaCreationTask(m_selectedVersion));
-    } else {
-        QString suggestedName = QString("%1 %2").arg(m_selectedVersion->descriptor(), selectedLoaderName());
-        m_dialog->setSuggestedPack(suggestedName, new VanillaCreationTask(m_selectedVersion, m_selectedLoader, m_selectedLoaderVersion));
+    if (ui->loaderVersionList->selectedVersion() == nullptr)
+        dialog->setSuggestedPack(m_selectedVersion->descriptor(), new VanillaCreationTask(m_selectedVersion));
+    else {
+        dialog->setSuggestedPack(m_selectedVersion->descriptor(),
+                                 new VanillaCreationTask(m_selectedVersion, m_selectedLoader, m_selectedLoaderVersion));
     }
-    m_dialog->setSuggestedIcon("default");
+    dialog->setSuggestedIcon("default");
 }
 
 void CustomPage::setSelectedVersion(BaseVersion::Ptr version)
 {
-    m_selectedVersion = std::move(version);
+    m_selectedVersion = version;
     suggestCurrent();
     loaderFilterChanged();
 }
 
 void CustomPage::setSelectedLoaderVersion(BaseVersion::Ptr version)
 {
-    m_selectedLoaderVersion = std::move(version);
+    m_selectedLoaderVersion = version;
     suggestCurrent();
 }

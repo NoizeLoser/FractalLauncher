@@ -56,7 +56,9 @@ class QGridLayout;
 class PageContainer : public QWidget, public BasePageContainer {
     Q_OBJECT
    public:
-    explicit PageContainer(BasePageProvider* pageProvider, QString defaultId = QString(), QWidget* parent = nullptr);
+    explicit PageContainer(BasePageProvider* pageProvider,
+                           QString defaultId = QString(),
+                           QWidget* parent = nullptr);
     ~PageContainer() override = default;
 
     void addButtons(QWidget* buttons);

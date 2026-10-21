@@ -25,25 +25,18 @@
 #include <optional>
 #include <utility>
 
-#include "Handle.h"
-#include "Result.h"
-
 struct archive;
 struct archive_entry;
-
-extern "C" {
-int archive_read_free(archive*);
-}
-
 namespace MMCZip {
 class ArchiveReader {
    public:
+    using ArchivePtr = std::unique_ptr<struct archive, int (*)(struct archive*)>;
     explicit ArchiveReader(QString fileName) : m_archivePath(std::move(fileName)) {}
     virtual ~ArchiveReader() = default;
 
     QStringList getFiles();
     QString getZipName();
-    Result<> collectFiles(bool onlyFiles = true);
+    bool collectFiles(bool onlyFiles = true);
     bool exists(const QString& filePath) const;
 
     class File {
@@ -56,24 +49,23 @@ class ArchiveReader {
         QDateTime dateTime();
         const char* error();
 
-        Result<QByteArray> readAll();
-        Result<> skip();
-        Result<> writeFile(archive* out, const QString& targetFileName = "", bool notBlock = false);
-        Result<> writeFile(archive* out, const QString& targetFileName, std::optional<QDir> root, bool notBlock = false);
+        QByteArray readAll(int* outStatus = nullptr);
+        bool skip();
+        bool writeFile(archive* out, const QString& targetFileName = "", bool notBlock = false);
+        bool writeFile(archive* out, const QString& targetFileName, std::optional<QDir> root, bool notBlock = false);
 
        private:
         int readNextHeader();
 
        private:
         friend ArchiveReader;
-        Handle<struct archive, archive_read_free> m_archive;
+        ArchivePtr m_archive;
         archive_entry* m_entry;
     };
 
-    Result<std::unique_ptr<File>> goToFile(const QString& filename);
-    Result<QByteArray> readFile(const QString& fileName);
-    Result<> parse(const std::function<Result<>(File*)>&);
-    Result<> parse(const std::function<Result<bool>(File*)>&);
+    std::unique_ptr<File> goToFile(const QString& filename);
+    bool parse(const std::function<bool(File*)>&);
+    bool parse(const std::function<bool(File*, bool&)>&);
 
    private:
     QString m_archivePath;

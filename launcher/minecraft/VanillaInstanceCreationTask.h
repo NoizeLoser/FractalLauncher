@@ -1,25 +1,22 @@
 #pragma once
 
-#include <memory>
-#include "BaseVersion.h"
-#include "InstanceTask.h"
-#include "minecraft/MinecraftInstance.h"
+#include "InstanceCreationTask.h"
 
-class VanillaCreationTask final : public InstanceTask {
+#include <utility>
+
+class VanillaCreationTask final : public InstanceCreationTask {
     Q_OBJECT
    public:
-    explicit VanillaCreationTask(BaseVersion::Ptr version) : m_version(std::move(version)) {}
-    VanillaCreationTask(BaseVersion::Ptr version, QString loader, BaseVersion::Ptr loaderVersion);
+    VanillaCreationTask(BaseVersion::Ptr version) : InstanceCreationTask(), m_version(std::move(version)) {}
+    VanillaCreationTask(BaseVersion::Ptr version, QString loader, BaseVersion::Ptr loader_version);
 
-    void executeTask() override;
+    std::unique_ptr<MinecraftInstance> createInstance() override;
 
    private:
-    std::unique_ptr<MinecraftInstance> m_instance;
-
     // Version to update to / create of the instance.
     BaseVersion::Ptr m_version;
 
-    bool m_usingLoader = false;
+    bool m_using_loader = false;
     QString m_loader;
-    BaseVersion::Ptr m_loaderVersion;
+    BaseVersion::Ptr m_loader_version;
 };

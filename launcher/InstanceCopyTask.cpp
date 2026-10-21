@@ -46,7 +46,7 @@ void InstanceCopyTask::executeTask()
 
             folderClone(true);
             setProgress(0, folderClone.totalCloned());
-            connect(&folderClone, &FS::clone::fileCloned, this,
+            connect(&folderClone, &FS::clone::fileCloned,
                     [this](QString src, QString dst) { setProgress(m_progress + 1, m_progressTotal); });
             return folderClone();
         }
@@ -66,8 +66,7 @@ void InstanceCopyTask::executeTask()
                                                        FS::PathCombine(staging_mc_dir, "saves"));
                 (*savesCopy)(true);
                 setProgress(0, savesCopy->totalCopied());
-                connect(savesCopy.get(), &FS::copy::fileCopied, this,
-                        [this](QString src) { setProgress(m_progress + 1, m_progressTotal); });
+                connect(savesCopy.get(), &FS::copy::fileCopied, [this](QString src) { setProgress(m_progress + 1, m_progressTotal); });
             }
             FS::create_link folderLink(m_origInstance->instanceRoot(), m_stagingPath);
             int depth = m_linkRecursively ? -1 : 0;  // we need to at least link the top level instead of the instance folder
@@ -75,7 +74,7 @@ void InstanceCopyTask::executeTask()
 
             folderLink(true);
             setProgress(0, m_progressTotal + folderLink.totalToLink());
-            connect(&folderLink, &FS::create_link::fileLinked, this,
+            connect(&folderLink, &FS::create_link::fileLinked,
                     [this](QString src, QString dst) { setProgress(m_progress + 1, m_progressTotal); });
             bool there_were_errors = false;
 
@@ -87,13 +86,31 @@ void InstanceCopyTask::executeTask()
 
                     qDebug() << "attempting to run with privelage";
 
-                    bool linked = folderLink.runPrivilegedAndWait();
+                    QEventLoop loop;
+                    bool got_priv_results = false;
 
-                    if (savesCopy) {
-                        linked &= (*savesCopy)();
+                    connect(&folderLink, &FS::create_link::finishedPrivileged, this, [&got_priv_results, &loop](bool gotResults) {
+                        if (!gotResults) {
+                            qDebug() << "Privileged run exited without results!";
+                        }
+                        got_priv_results = gotResults;
+                        loop.quit();
+                    });
+                    folderLink.runPrivileged();
+
+                    loop.exec();  // wait for the finished signal
+
+                    for (auto result : folderLink.getResults()) {
+                        if (result.err_value != 0) {
+                            there_were_errors = true;
+                        }
                     }
 
-                    return linked;
+                    if (savesCopy) {
+                        there_were_errors |= !(*savesCopy)();
+                    }
+
+                    return got_priv_results && !there_were_errors;
                 }
 #else
                 qDebug() << "Link Failed!" << folderLink.getOSError().value() << folderLink.getOSError().message().c_str();
@@ -112,7 +129,7 @@ void InstanceCopyTask::executeTask()
 
         folderCopy(true);
         setProgress(0, folderCopy.totalCopied());
-        connect(&folderCopy, &FS::copy::fileCopied, this, [this]() { setProgress(m_progress + 1, m_progressTotal); });
+        connect(&folderCopy, &FS::copy::fileCopied, [this]() { setProgress(m_progress + 1, m_progressTotal); });
         return folderCopy();
     });
     connect(&m_copyFutureWatcher, &QFutureWatcher<bool>::finished, this, &InstanceCopyTask::copyFinished);
@@ -140,31 +157,25 @@ void InstanceCopyTask::copyFinished()
     }
     if (m_useLinks) {
         inst->addLinkedInstanceId(m_origInstance->id());
-        auto allowedSymlinksFile = QFileInfo(FS::PathCombine(inst->gameRoot(), "allowed_symlinks.txt"));
+        auto allowed_symlinks_file = QFileInfo(FS::PathCombine(inst->gameRoot(), "allowed_symlinks.txt"));
 
-        QByteArray allowedSymlinks;
-        if (allowedSymlinksFile.exists()) {
-            auto res = FS::read(allowedSymlinksFile.filePath());
-            if (!res) {
-                qCritical() << "Failed to read symlink" << res.error();
-            } else {
-                allowedSymlinks.append(res.value());
-                if (allowedSymlinks.right(1) != "\n") {
-                    allowedSymlinks.append("\n");  // we want to be on a new line
-                }
-            }
+        QByteArray allowed_symlinks;
+        if (allowed_symlinks_file.exists()) {
+            allowed_symlinks.append(FS::read(allowed_symlinks_file.filePath()));
+            if (allowed_symlinks.right(1) != "\n")
+                allowed_symlinks.append("\n");  // we want to be on a new line
         }
-        allowedSymlinks.append(m_origInstance->gameRoot().toUtf8());
-        allowedSymlinks.append("\n");
-        if (allowedSymlinksFile.isSymLink()) {
+        allowed_symlinks.append(m_origInstance->gameRoot().toUtf8());
+        allowed_symlinks.append("\n");
+        if (allowed_symlinks_file.isSymLink())
             FS::deletePath(
-                allowedSymlinksFile
+                allowed_symlinks_file
                     .filePath());  // we dont want to modify the original. also make sure the resulting file is not itself a link.
-        }
 
-        auto res = FS::write(allowedSymlinksFile.filePath(), allowedSymlinks);
-        if (!res) {
-            qCritical() << "Failed to write symlink :" << res.error();
+        try {
+            FS::write(allowed_symlinks_file.filePath(), allowed_symlinks);
+        } catch (const FS::FileSystemException& e) {
+            qCritical() << "Failed to write symlink :" << e.cause();
         }
     }
 
@@ -174,6 +185,7 @@ void InstanceCopyTask::copyFinished()
 void InstanceCopyTask::copyAborted()
 {
     emitFailed(tr("Instance folder copy has been aborted."));
+    return;
 }
 
 bool InstanceCopyTask::abort()

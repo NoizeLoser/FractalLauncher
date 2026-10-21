@@ -1,25 +1,27 @@
 #pragma once
 
 #include "ModIndex.h"
+#include "net/NetJob.h"
 
 #include "modplatform/helpers/HashUtils.h"
 
-#include <QDir>
-
 #include "minecraft/mod/Resource.h"
+#include "tasks/ConcurrentTask.h"
+
+class Mod;
+class QDir;
 
 class EnsureMetadataTask : public Task {
     Q_OBJECT
 
    public:
-    EnsureMetadataTask(Resource*, const QDir&, ModPlatform::ResourceProvider = ModPlatform::ResourceProvider::MODRINTH);
-    EnsureMetadataTask(QList<Resource*>&, const QDir&, ModPlatform::ResourceProvider = ModPlatform::ResourceProvider::MODRINTH);
-    EnsureMetadataTask(QHash<QString, Resource*>&, const QDir&, ModPlatform::ResourceProvider = ModPlatform::ResourceProvider::MODRINTH);
+    EnsureMetadataTask(Resource*, QDir, ModPlatform::ResourceProvider = ModPlatform::ResourceProvider::MODRINTH);
+    EnsureMetadataTask(QList<Resource*>&, QDir, ModPlatform::ResourceProvider = ModPlatform::ResourceProvider::MODRINTH);
+    EnsureMetadataTask(QHash<QString, Resource*>&, QDir, ModPlatform::ResourceProvider = ModPlatform::ResourceProvider::MODRINTH);
 
-    ~EnsureMetadataTask() override = default;
+    ~EnsureMetadataTask() = default;
 
     Task::Ptr getHashingTask() { return m_hashingTask; }
-    void setUpdateLock(bool lockUpdate) { m_lockUpdate = lockUpdate; }
 
    public slots:
     bool abort() override;
@@ -35,7 +37,7 @@ class EnsureMetadataTask : public Task {
     Task::Ptr flameProjectsTask();
 
     // Helpers
-    enum class RemoveFromList : std::uint8_t { Yes, No };
+    enum class RemoveFromList { Yes, No };
     void emitReady(Resource*, QString key = {}, RemoveFromList = RemoveFromList::Yes);
     void emitFail(Resource*, QString key = {}, RemoveFromList = RemoveFromList::Yes);
 
@@ -60,5 +62,4 @@ class EnsureMetadataTask : public Task {
     Task::Ptr m_hashingTask;
     Task::Ptr m_currentTask;
     QHash<QString, Task::Ptr> m_updateMetadataTasks;
-    bool m_lockUpdate = false;
 };

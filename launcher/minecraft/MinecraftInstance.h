@@ -63,6 +63,8 @@ class MinecraftInstance : public BaseInstance {
     void loadSpecificSettings() override;
 
     // FIXME: remove
+    QString typeName() const override;
+    // FIXME: remove
     QSet<QString> traits() const override;
 
     bool canEdit() const override { return true; }

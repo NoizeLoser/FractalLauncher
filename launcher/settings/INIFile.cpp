@@ -46,33 +46,28 @@
 #include <QTextStream>
 
 #include <QSettings>
-#include <utility>
 #include "Json.h"
 
-INIFile::INIFile() = default;
+INIFile::INIFile() {}
 
-bool INIFile::saveFile(const QString& fileName)
+bool INIFile::saveFile(QString fileName)
 {
-    if (!contains("ConfigVersion")) {
+    if (!contains("ConfigVersion"))
         insert("ConfigVersion", "1.3");
-    }
-    QSettings settingsObj{ fileName, QSettings::Format::IniFormat };
-    settingsObj.setFallbacksEnabled(false);
-    settingsObj.clear();
+    QSettings _settings_obj{ fileName, QSettings::Format::IniFormat };
+    _settings_obj.setFallbacksEnabled(false);
+    _settings_obj.clear();
 
-    for (Iterator iter = begin(); iter != end(); iter++) {
-        settingsObj.setValue(iter.key(), iter.value());
-    }
+    for (Iterator iter = begin(); iter != end(); iter++)
+        _settings_obj.setValue(iter.key(), iter.value());
 
-    settingsObj.sync();
+    _settings_obj.sync();
 
-    if (auto status = settingsObj.status(); status != QSettings::Status::NoError) {
-        if (status == QSettings::Status::AccessError) {
+    if (auto status = _settings_obj.status(); status != QSettings::Status::NoError) {
+        if (status == QSettings::Status::AccessError)
             qCritical() << "An access error occurred while saving INI file" << fileName << "(is the file read-only?)";
-        }
-        if (ASSERT_NEVER(status == QSettings::Status::FormatError)) {
+        if (ASSERT_NEVER(status == QSettings::Status::FormatError))
             qCritical() << "A format error occurred while saving INI file" << fileName << "(this shouldn't be possible!)";
-        }
 
         return false;
     }
@@ -80,23 +75,20 @@ bool INIFile::saveFile(const QString& fileName)
     return true;
 }
 
-namespace {
-
-QString unescape(const QString& orig)
+QString unescape(QString orig)
 {
     QString out;
     QChar prev = QChar::Null;
     for (auto c : orig) {
         if (prev == '\\') {
-            if (c == 'n') {
+            if (c == 'n')
                 out += '\n';
-            } else if (c == 't') {
+            else if (c == 't')
                 out += '\t';
-            } else if (c == '#') {
+            else if (c == '#')
                 out += '#';
-            } else {
+            else
                 out += c;
-            }
             prev = QChar::Null;
         } else {
             if (c == '\\') {
@@ -113,7 +105,12 @@ QString unescape(const QString& orig)
 QString unquote(QString str)
 {
     if ((str.contains(QChar(';')) || str.contains(QChar('=')) || str.contains(QChar(','))) && str.endsWith("\"") && str.startsWith("\"")) {
+#if QT_VERSION < QT_VERSION_CHECK(6, 5, 0)
+        str = str.remove(0, 1);
+        str = str.remove(str.size() - 1, 1);
+#else
         str = str.removeFirst().removeLast();
+#endif
     }
     return str;
 }
@@ -121,11 +118,15 @@ QString unquote(QString str)
 bool parseOldFileFormat(QIODevice& device, QSettings::SettingsMap& map)
 {
     QTextStream in(device.readAll());
+#if QT_VERSION <= QT_VERSION_CHECK(6, 0, 0)
+    in.setCodec("UTF-8");
+#endif
+
     QStringList lines = in.readAll().split('\n');
     for (int i = 0; i < lines.count(); i++) {
         QString& lineRaw = lines[i];
         // Ignore comments.
-        qsizetype commentIndex = 0;
+        int commentIndex = 0;
         QString line = lineRaw;
         // Search for comments until no more escaped # are available
         while ((commentIndex = line.indexOf('#', commentIndex + 1)) != -1) {
@@ -135,10 +136,9 @@ bool parseOldFileFormat(QIODevice& device, QSettings::SettingsMap& map)
             line = line.left(lineRaw.indexOf('#')).trimmed();
         }
 
-        auto eqPos = line.indexOf('=');
-        if (eqPos == -1) {
+        int eqPos = line.indexOf('=');
+        if (eqPos == -1)
             continue;
-        }
         QString key = line.left(eqPos).trimmed();
         QString valueStr = line.right(line.length() - eqPos - 1).trimmed();
 
@@ -151,16 +151,16 @@ bool parseOldFileFormat(QIODevice& device, QSettings::SettingsMap& map)
     return true;
 }
 
-QVariant migrateQByteArrayToBase64(const QString& key, QVariant value)
+QVariant migrateQByteArrayToBase64(QString key, QVariant value)
 {
-    static const QStringList s_otherByteArrays = { "MainWindowState",       "MainWindowGeometry", "ConsoleWindowState",
-                                                   "ConsoleWindowGeometry", "PagedGeometry",      "NewInstanceGeometry",
-                                                   "ModDownloadGeometry",   "RPDownloadGeometry", "TPDownloadGeometry",
-                                                   "ShaderDownloadGeometry" };
-    if (key.startsWith("UI/") && key.endsWith("_Page/Columns")) {
+    static const QStringList otherByteArrays = { "MainWindowState",       "MainWindowGeometry", "ConsoleWindowState",
+                                                 "ConsoleWindowGeometry", "PagedGeometry",      "NewInstanceGeometry",
+                                                 "ModDownloadGeometry",   "RPDownloadGeometry", "TPDownloadGeometry",
+                                                 "ShaderDownloadGeometry" };
+    if (key.startsWith("WideBarVisibility_") || (key.startsWith("UI/") && key.endsWith("_Page/Columns"))) {
         return QString::fromUtf8(value.toByteArray().toBase64());
     }
-    if (s_otherByteArrays.contains(key)) {
+    if (otherByteArrays.contains(key)) {
         return QString::fromUtf8(value.toByteArray());
     }
     if (key == "linkedInstances") {
@@ -171,27 +171,23 @@ QVariant migrateQByteArrayToBase64(const QString& key, QVariant value)
     }
     return value;
 }
-}  // namespace
 
-bool INIFile::loadFile(const QString& fileName)
+bool INIFile::loadFile(QString fileName)
 {
-    QSettings settingsObj{ fileName, QSettings::Format::IniFormat };
-    settingsObj.setFallbacksEnabled(false);
+    QSettings _settings_obj{ fileName, QSettings::Format::IniFormat };
+    _settings_obj.setFallbacksEnabled(false);
 
-    if (auto status = settingsObj.status(); status != QSettings::Status::NoError) {
-        if (status == QSettings::Status::AccessError) {
+    if (auto status = _settings_obj.status(); status != QSettings::Status::NoError) {
+        if (status == QSettings::Status::AccessError)
             qCritical() << "An access error occurred while loading INI file" << fileName;
-        }
-        if (status == QSettings::Status::FormatError) {
+        if (status == QSettings::Status::FormatError)
             qCritical() << "A format error occurred while loading INI file" << fileName << "(is the file malformed or corrupted?)";
-        }
         return false;
     }
-    if (!settingsObj.value("ConfigVersion").isValid()) {
+    if (!_settings_obj.value("ConfigVersion").isValid()) {
         QFile file(fileName);
-        if (!file.open(QIODevice::ReadOnly)) {
+        if (!file.open(QIODevice::ReadOnly))
             return false;
-        }
         QSettings::SettingsMap map;
         parseOldFileFormat(file, map);
         file.close();
@@ -200,9 +196,9 @@ bool INIFile::loadFile(const QString& fileName)
             insert(key, value);
         }
         insert("ConfigVersion", "1.3");
-    } else if (settingsObj.value("ConfigVersion").toString() == "1.1") {
-        for (auto&& key : settingsObj.allKeys()) {
-            auto value = migrateQByteArrayToBase64(key, settingsObj.value(key));
+    } else if (_settings_obj.value("ConfigVersion").toString() == "1.1") {
+        for (auto&& key : _settings_obj.allKeys()) {
+            auto value = migrateQByteArrayToBase64(key, _settings_obj.value(key));
             if (auto valueStr = value.toString();
                 (valueStr.contains(QChar(';')) || valueStr.contains(QChar('=')) || valueStr.contains(QChar(','))) &&
                 valueStr.endsWith("\"") && valueStr.startsWith("\"")) {
@@ -212,26 +208,25 @@ bool INIFile::loadFile(const QString& fileName)
             }
         }
         insert("ConfigVersion", "1.3");
-    } else if (settingsObj.value("ConfigVersion").toString() == "1.2") {
-        for (auto&& key : settingsObj.allKeys()) {
-            auto value = migrateQByteArrayToBase64(key, settingsObj.value(key));
+    } else if (_settings_obj.value("ConfigVersion").toString() == "1.2") {
+        for (auto&& key : _settings_obj.allKeys()) {
+            auto value = migrateQByteArrayToBase64(key, _settings_obj.value(key));
             insert(key, value);
         }
         insert("ConfigVersion", "1.3");
     } else {
-        for (auto&& key : settingsObj.allKeys()) {
-            insert(key, settingsObj.value(key));
+        for (auto&& key : _settings_obj.allKeys()) {
+            insert(key, _settings_obj.value(key));
         }
     }
     return true;
 }
 
-bool INIFile::loadFile(const QByteArray& data)
+bool INIFile::loadFile(QByteArray data)
 {
     QTemporaryFile file;
-    if (!file.open()) {
+    if (!file.open())
         return false;
-    }
     file.write(data);
     file.flush();
     file.close();
@@ -240,15 +235,15 @@ bool INIFile::loadFile(const QByteArray& data)
     return loaded;
 }
 
-QVariant INIFile::get(const QString& key, QVariant def) const
+QVariant INIFile::get(QString key, QVariant def) const
 {
-    if (!this->contains(key)) {
+    if (!this->contains(key))
         return def;
-    }
-    return this->operator[](key);
+    else
+        return this->operator[](key);
 }
 
-void INIFile::set(const QString& key, QVariant val)
+void INIFile::set(QString key, QVariant val)
 {
-    this->operator[](key) = std::move(val);
+    this->operator[](key) = val;
 }

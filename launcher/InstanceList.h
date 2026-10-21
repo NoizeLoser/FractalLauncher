@@ -36,26 +36,25 @@
 #pragma once
 
 #include <QAbstractListModel>
-#include <QHash>
 #include <QList>
 #include <QObject>
 #include <QPair>
 #include <QSet>
 #include <QStack>
-#include <cstdint>
 
-#include "minecraft/MinecraftInstance.h"
+#include "BaseInstance.h"
 
 class QFileSystemWatcher;
 class InstanceTask;
+struct InstanceName;
 
 using InstanceId = QString;
 using GroupId = QString;
-using InstanceLocator = std::pair<MinecraftInstance*, int>;
+using InstanceLocator = std::pair<BaseInstance*, int>;
 
-enum class InstCreateError : std::uint8_t { NoCreateError = 0, NoSuchVersion, UnknownCreateError, InstExists, CantCreateDir };
+enum class InstCreateError { NoCreateError = 0, NoSuchVersion, UnknownCreateError, InstExists, CantCreateDir };
 
-enum class GroupsState : std::uint8_t { NotLoaded, Steady, Dirty };
+enum class GroupsState { NotLoaded, Steady, Dirty };
 
 struct TrashShortcutItem {
     ShortcutData data;
@@ -74,8 +73,8 @@ class InstanceList : public QAbstractListModel {
     Q_OBJECT
 
    public:
-    explicit InstanceList(SettingsObject* settings, const QStringList& instDirs, QObject* parent = nullptr);
-    ~InstanceList() override = default;
+    explicit InstanceList(SettingsObject* settings, const QString& instDir, QObject* parent = 0);
+    virtual ~InstanceList();
 
    public:
     QModelIndex index(int row, int column = 0, const QModelIndex& parent = QModelIndex()) const override;
@@ -95,9 +94,9 @@ class InstanceList : public QAbstractListModel {
      * NoError Indicates that no error occurred.
      * UnknownError indicates that an unspecified error occurred.
      */
-    enum InstListError : std::uint8_t { NoError = 0, UnknownError };
+    enum InstListError { NoError = 0, UnknownError };
 
-    MinecraftInstance* at(int i) const { return m_instances.at(i).get(); }
+    BaseInstance* at(int i) const { return m_instances.at(i).get(); }
 
     int count() const { return static_cast<int>(m_instances.size()); }
 
@@ -105,9 +104,9 @@ class InstanceList : public QAbstractListModel {
     void saveNow();
 
     /* O(n) */
-    MinecraftInstance* getInstanceById(const QString& id) const;
+    BaseInstance* getInstanceById(QString id) const;
     /* O(n) */
-    MinecraftInstance* getInstanceByManagedName(const QString& managedName) const;
+    BaseInstance* getInstanceByManagedName(const QString& managed_name) const;
     QModelIndex getInstanceIndexById(const QString& id) const;
     QStringList getGroups();
     bool isGroupCollapsed(const QString& groupName);
@@ -129,7 +128,7 @@ class InstanceList : public QAbstractListModel {
      * Create a new empty staging area for instance creation and @return a path/key top commit it later.
      * Used by instance manipulation tasks.
      */
-    QString getStagedInstancePath(const QString& targetDir);
+    QString getStagedInstancePath();
 
     /**
      * Commit the staging area given by @keyPath to the provider - used when creation succeeds.
@@ -137,7 +136,15 @@ class InstanceList : public QAbstractListModel {
      * should_override is used when another similar instance already exists, and we want to override it
      * - for instance, when updating it.
      */
-    bool commitStagedInstance(const QString& keyPath, const InstanceTask& instanceTask, QString groupName);
+    bool commitStagedInstance(const QString& keyPath, const InstanceName& instanceName, QString groupName, const InstanceTask&);
+
+    /**
+     * Destroy a previously created staging area given by @keyPath - used when creation fails.
+     * Used by instance manipulation tasks.
+     */
+    bool destroyStagingPath(const QString& keyPath);
+
+    int getTotalPlayTime();
 
     Qt::DropActions supportedDragActions() const override;
 
@@ -152,9 +159,6 @@ class InstanceList : public QAbstractListModel {
 
     QStringList getLinkedInstancesById(const QString& id) const;
 
-    QString primaryDir() const { return m_instDirs.isEmpty() ? QString() : m_instDirs.first(); }
-    const QStringList& instanceDirs() const { return m_instDirs; }
-
    signals:
     void dataIsInvalid();
     void instancesChanged();
@@ -162,44 +166,43 @@ class InstanceList : public QAbstractListModel {
     void groupsChanged(QSet<QString> groups);
 
    public slots:
-    void on_InstFolderChanged(const Setting& setting, const QVariant& value);
+    void on_InstFolderChanged(const Setting& setting, QVariant value);
     void on_GroupStateChanged(const QString& group, bool collapsed);
 
    private slots:
-    void propertiesChanged(MinecraftInstance* inst);
+    void propertiesChanged(BaseInstance* inst);
     void providerUpdated();
     void instanceDirContentsChanged(const QString& path);
 
    private:
-    int getInstIndex(MinecraftInstance* inst) const;
-    void migrateTotalPlayTime();
+    int getInstIndex(BaseInstance* inst) const;
+    void updateTotalPlayTime();
     void suspendWatch();
     void resumeWatch();
-    void add(std::vector<std::unique_ptr<MinecraftInstance>>& list);
+    void add(std::vector<std::unique_ptr<BaseInstance>>& list);
     void loadGroupList();
     void saveGroupList();
     QList<InstanceId> discoverInstances();
-    std::unique_ptr<MinecraftInstance> loadInstance(const InstanceId& id);
+    std::unique_ptr<BaseInstance> loadInstance(const InstanceId& id);
 
     void increaseGroupCount(const QString& group);
     void decreaseGroupCount(const QString& group);
 
    private:
     int m_watchLevel = 0;
+    int totalPlayTime = 0;
     bool m_dirty = false;
-    std::vector<std::unique_ptr<MinecraftInstance>> m_instances;
+    std::vector<std::unique_ptr<BaseInstance>> m_instances;
     // id -> refs
     QMap<QString, int> m_groupNameCache;
 
     SettingsObject* m_globalSettings;
-    QStringList m_instDirs;
-    QHash<InstanceId, QString> m_instanceRootDirMap;
-    QString rootDirOf(const InstanceId& id) const;
+    QString m_instDir;
     QFileSystemWatcher* m_watcher;
     // FIXME: this is so inefficient that looking at it is almost painful.
     QSet<QString> m_collapsedGroups;
     QMap<InstanceId, GroupId> m_instanceGroupIndex;
-    QSet<InstanceId> m_instanceSet;
+    QSet<InstanceId> instanceSet;
     bool m_groupsLoaded = false;
     bool m_instancesProbed = false;
 

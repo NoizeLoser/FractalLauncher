@@ -27,30 +27,30 @@ void ExportToZipTask::executeTask()
     setStatus("Adding files...");
     setProgress(0, m_files.length());
     m_buildZipFuture = QtConcurrent::run(QThreadPool::globalInstance(), [this]() { return exportZip(); });
-    connect(&m_buildZipWatcher, &QFutureWatcher<Result<>>::finished, this, &ExportToZipTask::finish);
+    connect(&m_buildZipWatcher, &QFutureWatcher<ZipResult>::finished, this, &ExportToZipTask::finish);
     m_buildZipWatcher.setFuture(m_buildZipFuture);
 }
 
-auto ExportToZipTask::exportZip() -> Result<>
+auto ExportToZipTask::exportZip() -> ZipResult
 {
     if (!m_dir.exists()) {
-        return std::unexpected(tr("Folder doesn't exist"));
+        return ZipResult(tr("Folder doesn't exist"));
     }
-    if (const auto result = m_output.open(); !result) {
-        return std::unexpected(tr("Failed to open output file: %1").arg(result.error()));
+    if (!m_output.open()) {
+        return ZipResult(tr("Could not create file"));
     }
 
     for (auto fileName : m_extraFiles.keys()) {
         if (m_buildZipFuture.isCanceled())
-            return {};
-        if (const auto result = m_output.addFile(fileName, m_extraFiles[fileName]); !result) {
-            return std::unexpected(tr("Could not add %1: %2").arg(fileName, result.error()));
+            return ZipResult();
+        if (!m_output.addFile(fileName, m_extraFiles[fileName])) {
+            return ZipResult(tr("Could not add:") + fileName);
         }
     }
 
     for (const QFileInfo& file : m_files) {
         if (m_buildZipFuture.isCanceled())
-            return {};
+            return ZipResult();
 
         auto absolute = file.absoluteFilePath();
         auto relative = m_dir.relativeFilePath(absolute);
@@ -63,17 +63,15 @@ auto ExportToZipTask::exportZip() -> Result<>
                 absolute = file.canonicalFilePath();
         }
 
-        if (!m_excludeFiles.contains(relative)) {
-            if (const auto result = m_output.addFile(absolute, m_destinationPrefix + relative); !result) {
-                return std::unexpected(tr("Could not read and compress %1: %2").arg(relative, result.error()));
-            }
+        if (!m_excludeFiles.contains(relative) && !m_output.addFile(absolute, m_destinationPrefix + relative)) {
+            return ZipResult(tr("Could not read and compress %1").arg(relative));
         }
     }
 
-    if (const auto result = m_output.close(); !result) {
-        return std::unexpected(tr("Failed to close output file: %1").arg(result.error()));
+    if (!m_output.close()) {
+        return ZipResult(tr("A zip error occurred"));
     }
-    return {};
+    return ZipResult();
 }
 
 void ExportToZipTask::finish()
@@ -81,9 +79,9 @@ void ExportToZipTask::finish()
     if (m_buildZipFuture.isCanceled()) {
         FS::deletePath(m_outputPath);
         emitAborted();
-    } else if (auto result = m_buildZipFuture.result(); !result) {
+    } else if (auto result = m_buildZipFuture.result(); result.has_value()) {
         FS::deletePath(m_outputPath);
-        emitFailed(result.error());
+        emitFailed(result.value());
     } else {
         emitSucceeded();
     }

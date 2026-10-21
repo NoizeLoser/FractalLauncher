@@ -25,24 +25,6 @@ namespace ResourceDownload {
 class ResourceDownloadDialog;
 class ResourceModel;
 
-struct ResourceProviderData {
-    QString displayName;
-    QIcon icon;
-    QString id;
-    QString metaEntryBase;
-    QString debugName;
-};
-
-struct ResourceDescriptor {
-    QString helpPage;
-    QString resourceString = QObject::tr("resource");
-    QString resourcesString = QObject::tr("resources");
-
-    bool supportsFiltering = false;
-    bool isIndexed = true;
-    QMap<QString, QString> urlHandlers;
-};
-
 class ResourcePage : public QWidget, public BasePage {
     Q_OBJECT
    public:
@@ -50,23 +32,23 @@ class ResourcePage : public QWidget, public BasePage {
     ~ResourcePage() override;
 
     /* Affects what the user sees */
-    auto displayName() const -> QString override { return m_provider.displayName; };
-    auto icon() const -> QIcon override { return m_provider.icon; };
-    auto id() const -> QString override { return m_provider.id; };
-    auto helpPage() const -> QString override { return m_desc.helpPage; };
-    bool shouldDisplay() const override { return true; };
+    auto displayName() const -> QString override = 0;
+    auto icon() const -> QIcon override = 0;
+    auto id() const -> QString override = 0;
+    auto helpPage() const -> QString override = 0;
+    bool shouldDisplay() const override = 0;
 
     /* Used internally */
-    auto metaEntryBase() const -> QString { return m_provider.metaEntryBase; };
-    auto debugName() const -> QString { return m_provider.debugName; };
+    virtual auto metaEntryBase() const -> QString = 0;
+    virtual auto debugName() const -> QString = 0;
 
     //: The plural version of 'resource'
-    QString resourcesString() const { return m_desc.resourcesString; }
+    virtual QString resourcesString() const { return tr("resources"); }
     //: The singular version of 'resources'
-    QString resourceString() const { return m_desc.resourceString; }
+    virtual QString resourceString() const { return tr("resource"); }
 
     /* Features this resource's page supports */
-    bool supportsFiltering() const { return m_desc.supportsFiltering; };
+    virtual bool supportsFiltering() const = 0;
 
     void retranslate() override;
     void openedImpl() override;
@@ -82,13 +64,8 @@ class ResourcePage : public QWidget, public BasePage {
     auto getDialog() const -> const ResourceDownloadDialog* { return m_parentDialog; }
     auto getModel() const -> ResourceModel* { return m_model; }
 
-    bool inProjectMode() const { return m_projectMode; }
-
    protected:
-    ResourcePage(ResourceDownloadDialog* parent,
-                 BaseInstance& baseInstance,
-                 ResourceDescriptor desc = {},
-                 ResourceProviderData provider = {});
+    ResourcePage(ResourceDownloadDialog* parent, BaseInstance&);
 
     void addSortings();
 
@@ -103,8 +80,7 @@ class ResourcePage : public QWidget, public BasePage {
     virtual void addResourceToPage(ModPlatform::IndexedPack::Ptr,
                                    ModPlatform::IndexedVersion&,
                                    ResourceFolderModel*,
-                                   QString downloadReason = "standalone",
-                                   QString dependentOn = "");
+                                   QString downloadReason = "standalone");
 
     virtual void modelReset();
 
@@ -112,8 +88,6 @@ class ResourcePage : public QWidget, public BasePage {
     bool hasSelectedPacks() { return !(m_model->selectedPacks().isEmpty()); }
 
     virtual void openProject(const QVariant& projectID);
-
-    void reloadCurrentVersions();
 
     void setSuppressInitialSearch(bool suppress);
 
@@ -126,11 +100,8 @@ class ResourcePage : public QWidget, public BasePage {
     void onResourceToggle(const QModelIndex& index);
 
     /** Associates regex expressions to pages in the order they're given in the map. */
-    QMap<QString, QString> urlHandlers() const { return m_desc.urlHandlers; };
-    void openUrl(QUrl);
-
-    void refreshVersionComboBox();
-    void restoreSelectedVersion(const ModPlatform::IndexedPack::Ptr& currentPack);
+    virtual QMap<QString, QString> urlHandlers() const = 0;
+    virtual void openUrl(const QUrl&);
 
    public:
     BaseInstance& m_baseInstance;
@@ -150,12 +121,7 @@ class ResourcePage : public QWidget, public BasePage {
 
     bool m_doNotJumpToMod = false;
 
-    bool m_projectMode = false;
-
     QSet<int> m_enableQueue;
-
-    ResourceDescriptor m_desc;
-    ResourceProviderData m_provider;
 
    private:
     bool m_suppressInitialSearch = false;

@@ -7,7 +7,7 @@ class JavaWizardWidget;
 class JavaWizardPage : public BaseWizardPage {
     Q_OBJECT
    public:
-    explicit JavaWizardPage(QWidget* parent = nullptr);
+    explicit JavaWizardPage(QWidget* parent = Q_NULLPTR);
 
     virtual ~JavaWizardPage() = default;
 

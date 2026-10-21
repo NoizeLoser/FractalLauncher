@@ -35,8 +35,8 @@
 
 #pragma once
 
-#include <expected>
 #include "Validator.h"
+#include "tasks/Task.h"
 
 namespace Net {
 class Sink {
@@ -44,55 +44,59 @@ class Sink {
     Sink() = default;
     virtual ~Sink() = default;
 
-    enum class InitType : std::uint8_t { Ok, CacheHit };
-    using InitResult = Result<InitType>;
-
    public:
-    virtual InitResult init(QNetworkRequest& request) = 0;
-    virtual Result<> write(const QByteArray& data) = 0;
-    virtual Result<> finalize(QNetworkReply& reply) = 0;
-    virtual void abort() = 0;
+    virtual auto init(QNetworkRequest& request) -> Task::State = 0;
+    virtual auto write(QByteArray& data) -> Task::State = 0;
+    virtual auto abort() -> Task::State = 0;
+    virtual auto finalize(QNetworkReply& reply) -> Task::State = 0;
 
     virtual auto hasLocalData() -> bool = 0;
+
+    QString failReason() const { return m_fail_reason; }
 
     void addValidator(Validator* validator)
     {
         if (validator) {
-            m_validators.push_back(std::shared_ptr<Validator>(validator));
+            validators.push_back(std::shared_ptr<Validator>(validator));
         }
     }
 
    protected:
-    void initAllValidators()
+    bool initAllValidators(QNetworkRequest& request)
     {
-        for (auto& validator : m_validators) {
-            validator->init();
+        for (auto& validator : validators) {
+            if (!validator->init(request))
+                return false;
         }
+        return true;
     }
-    void writeAllValidators(const QByteArray& data)
+    bool finalizeAllValidators(QNetworkReply& reply)
     {
-        for (auto& validator : m_validators) {
-            validator->write(data);
+        for (auto& validator : validators) {
+            if (!validator->validate(reply))
+                return false;
         }
+        return true;
     }
-    void failAllValidators()
+    bool failAllValidators()
     {
-        for (auto& validator : m_validators) {
-            validator->abort();
+        bool success = true;
+        for (auto& validator : validators) {
+            success &= validator->abort();
         }
+        return success;
     }
-    Result<> finalizeAllValidators()
+    bool writeAllValidators(QByteArray& data)
     {
-        for (auto& validator : m_validators) {
-            auto result = validator->validate();
-            if (!result) {
-                return result;
-            }
+        for (auto& validator : validators) {
+            if (!validator->write(data))
+                return false;
         }
-        return {};
+        return true;
     }
 
    protected:
-    std::vector<std::shared_ptr<Validator>> m_validators;
+    std::vector<std::shared_ptr<Validator>> validators;
+    QString m_fail_reason;
 };
 }  // namespace Net

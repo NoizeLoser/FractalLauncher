@@ -7,7 +7,6 @@
 #include <optional>
 
 #include <QAbstractListModel>
-#include <utility>
 
 #include "QObjectPtr.h"
 
@@ -19,7 +18,6 @@
 
 class NetJob;
 class ResourceAPI;
-class ResourceFolderModel;
 
 namespace ModPlatform {
 struct IndexedPack;
@@ -30,12 +28,12 @@ namespace ResourceDownload {
 class ResourceModel : public QAbstractListModel {
     Q_OBJECT
 
-    Q_PROPERTY(QString search_term MEMBER m_searchTerm WRITE setSearchTerm)
+    Q_PROPERTY(QString search_term MEMBER m_search_term WRITE setSearchTerm)
 
    public:
     using DownloadTaskPtr = shared_qobject_ptr<ResourceDownloadTask>;
 
-    ResourceModel(ResourceFolderModel*, const ResourceAPI* api);
+    ResourceModel(ResourceAPI* api);
     ~ResourceModel() override;
 
     auto data(const QModelIndex& /*index*/, int role) const -> QVariant override;
@@ -49,13 +47,13 @@ class ResourceModel : public QAbstractListModel {
     int columnCount(const QModelIndex& parent) const override { return parent.isValid() ? 0 : 1; }
     auto flags(const QModelIndex& index) const -> Qt::ItemFlags override { return QAbstractListModel::flags(index); }
 
-    bool hasActiveSearchJob() const { return m_currentSearchJob && m_currentSearchJob->isRunning(); }
-    bool hasActiveInfoJob() const { return m_currentInfoJob.isRunning(); }
-    Task::Ptr activeSearchJob() { return hasActiveSearchJob() ? m_currentSearchJob : nullptr; }
+    bool hasActiveSearchJob() const { return m_current_search_job && m_current_search_job->isRunning(); }
+    bool hasActiveInfoJob() const { return m_current_info_job.isRunning(); }
+    Task::Ptr activeSearchJob() { return hasActiveSearchJob() ? m_current_search_job : nullptr; }
 
     auto getSortingMethods() const { return m_api->getSortingMethods(); }
 
-    virtual QVariant getInstalledPackVersion(ModPlatform::IndexedPack::Ptr /*unused*/) const;
+    virtual QVariant getInstalledPackVersion(ModPlatform::IndexedPack::Ptr) const { return {}; }
     /** Whether the version is opted out or not. Currently only makes sense in CF. */
     virtual bool optedOut(const ModPlatform::IndexedVersion& ver) const
     {
@@ -63,23 +61,23 @@ class ResourceModel : public QAbstractListModel {
         return false;
     };
 
-    virtual bool checkFilters(ModPlatform::IndexedPack::Ptr /*unused*/) { return true; }
+    virtual bool checkFilters(ModPlatform::IndexedPack::Ptr) { return true; }
     virtual bool checkVersionFilters(const ModPlatform::IndexedVersion&);
 
    public slots:
     void fetchMore(const QModelIndex& parent) override;
     bool canFetchMore(const QModelIndex& parent) const override
     {
-        return parent.isValid() ? false : m_searchState == SearchState::CanFetchMore;
+        return parent.isValid() ? false : m_search_state == SearchState::CanFetchMore;
     }
 
-    void setSearchTerm(QString term) { m_searchTerm = std::move(term); }
+    void setSearchTerm(QString term) { m_search_term = term; }
 
     virtual ResourceAPI::SearchArgs createSearchArguments() = 0;
 
     virtual ResourceAPI::VersionSearchArgs createVersionsArguments(const QModelIndex&) = 0;
 
-    ModPlatform::IndexedPack::Ptr createInfoArguments(const QModelIndex& index) { return m_packs[index.row()]; }
+    virtual ResourceAPI::ProjectInfoArgs createInfoArguments(const QModelIndex&) = 0;
 
     /** Requests the API for more entries. */
     virtual void search();
@@ -91,14 +89,13 @@ class ResourceModel : public QAbstractListModel {
     void refresh();
 
     /** Gets the icon at the URL for the given index. If it's not fetched yet, fetch it and update when fisinhed. */
-    std::optional<QIcon> getIcon(const QModelIndex&, const QUrl&);
+    std::optional<QIcon> getIcon(QModelIndex&, const QUrl&);
 
     void addPack(ModPlatform::IndexedPack::Ptr pack,
                  ModPlatform::IndexedVersion& version,
                  ResourceFolderModel* packs,
                  bool isIndexed = false,
-                 QString downloadReason = "standalone",
-                 QString dependentOn = "");
+                 QString downloadReason = "standalone");
     void removePack(const QString& rem);
     QList<DownloadTaskPtr> selectedPacks() { return m_selected; }
 
@@ -106,48 +103,46 @@ class ResourceModel : public QAbstractListModel {
     /** Resets the model's data. */
     void clearData();
 
-    void runSearchJob(const Task::Ptr&);
+    void runSearchJob(Task::Ptr);
     void runInfoJob(Task::Ptr);
 
     auto getCurrentSortingMethodByIndex() const -> std::optional<ResourceAPI::SortingMethod>;
 
-    virtual bool isPackInstalled(ModPlatform::IndexedPack::Ptr /*unused*/) const;
+    virtual bool isPackInstalled(ModPlatform::IndexedPack::Ptr) const { return false; }
 
    protected:
     /* Basic search parameters */
-    enum class SearchState : std::uint8_t { None, CanFetchMore, ResetRequested, Finished } m_searchState = SearchState::None;
-    int m_nextSearchOffset = 0;
-    QString m_searchTerm;
-    unsigned int m_currentSortIndex = 0;
+    enum class SearchState { None, CanFetchMore, ResetRequested, Finished } m_search_state = SearchState::None;
+    int m_next_search_offset = 0;
+    QString m_search_term;
+    unsigned int m_current_sort_index = 0;
 
-    ResourceFolderModel* m_resourceList = nullptr;
-
-    const ResourceAPI* m_api;
+    std::unique_ptr<ResourceAPI> m_api;
 
     // Job for searching for new entries
-    shared_qobject_ptr<Task> m_currentSearchJob;
+    shared_qobject_ptr<Task> m_current_search_job;
     // Job for fetching versions and extra info on existing entries
-    ConcurrentTask m_currentInfoJob;
+    ConcurrentTask m_current_info_job;
 
-    shared_qobject_ptr<NetJob> m_currentIconJob;
-    QSet<QUrl> m_currentlyRunningIconActions;
-    QSet<QUrl> m_failedIconActions;
+    shared_qobject_ptr<NetJob> m_current_icon_job;
+    QSet<QUrl> m_currently_running_icon_actions;
+    QSet<QUrl> m_failed_icon_actions;
 
     QList<ModPlatform::IndexedPack::Ptr> m_packs;
     QList<DownloadTaskPtr> m_selected;
 
     // HACK: We need this to prevent callbacks from calling the model after it has already been deleted.
     // This leaks a tiny bit of memory per time the user has opened a resource dialog. How to make this better?
-    static QHash<ResourceModel*, bool> s_runningModels;
+    static QHash<ResourceModel*, bool> s_running_models;
 
    private:
     /* Default search request callbacks */
-    void searchRequestSucceeded(const QList<ModPlatform::IndexedPack>&);
-    void searchRequestForOneSucceeded(const ModPlatform::IndexedPack::Ptr&);
-    void searchRequestFailed(const QString& reason, int networkErrorCode);
+    void searchRequestSucceeded(QList<ModPlatform::IndexedPack::Ptr>&);
+    void searchRequestForOneSucceeded(ModPlatform::IndexedPack::Ptr);
+    void searchRequestFailed(QString reason, int network_error_code);
     void searchRequestAborted();
 
-    void versionRequestSucceeded(QVector<ModPlatform::IndexedVersion>&, const QVariant&, const QModelIndex&);
+    void versionRequestSucceeded(QVector<ModPlatform::IndexedVersion>&, QVariant, const QModelIndex&);
 
     void infoRequestSucceeded(ModPlatform::IndexedPack::Ptr, const QModelIndex&);
 

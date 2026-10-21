@@ -38,29 +38,27 @@
 #include "PSaveFile.h"
 #include "Sink.h"
 
-#include <utility>
-
 namespace Net {
 class FileSink : public Sink {
    public:
-    explicit FileSink(QString filename) : m_filename(std::move(filename)) {};
-    ~FileSink() override = default;
+    FileSink(QString filename) : m_filename(filename) {};
+    virtual ~FileSink() = default;
 
    public:
-    InitResult init(QNetworkRequest& request) override;
-    Result<> write(const QByteArray& data) override;
-    Result<> finalize(QNetworkReply& reply) override;
-    void abort() override;
+    auto init(QNetworkRequest& request) -> Task::State override;
+    auto write(QByteArray& data) -> Task::State override;
+    auto abort() -> Task::State override;
+    auto finalize(QNetworkReply& reply) -> Task::State override;
 
     auto hasLocalData() -> bool override;
 
    protected:
-    virtual InitResult initCache(QNetworkRequest&) { return InitType::Ok; }
-    virtual Result<> finalizeCache(QNetworkReply& /*reply*/) { return {}; }
+    virtual auto initCache(QNetworkRequest&) -> Task::State;
+    virtual auto finalizeCache(QNetworkReply& reply) -> Task::State;
 
    protected:
     QString m_filename;
     bool m_wroteAnyData = false;
-    std::unique_ptr<PSaveFile> m_outputFile;
+    std::unique_ptr<PSaveFile> m_output_file;
 };
 }  // namespace Net

@@ -22,41 +22,39 @@
 
 namespace ATLauncher {
 
-Result<> loadShareCodeMod(ShareCodeMod& m, const QJsonObject& obj)
+static void loadShareCodeMod(ShareCodeMod& m, QJsonObject& obj)
 {
-    TRY_INTO(m.selected, Json::requireBoolean(obj, "selected"))
-    TRY_INTO(m.name, Json::requireString(obj, "name"))
-    return {};
+    m.selected = Json::requireBoolean(obj, "selected");
+    m.name = Json::requireString(obj, "name");
 }
 
-Result<> loadShareCode(ShareCode& c, const QJsonObject& obj)
+static void loadShareCode(ShareCode& c, QJsonObject& obj)
 {
-    TRY_INTO(c.pack, Json::requireString(obj, "pack"))
-    TRY_INTO(c.version, Json::requireString(obj, "version"))
+    c.pack = Json::requireString(obj, "pack");
+    c.version = Json::requireString(obj, "version");
 
-    TRY_INTO(const auto& optional,
-             Json::requireObject(obj, "mods").and_then([](const auto& v) { return Json::requireArray(v, "optional"); }))
+    auto mods = Json::requireObject(obj, "mods");
+    auto optional = Json::requireArray(mods, "optional");
     for (const auto modRaw : optional) {
+        auto modObj = Json::requireObject(modRaw);
         ShareCodeMod mod;
-        TRY(Json::requireObject(modRaw).and_then([&mod](const auto& v) { return loadShareCodeMod(mod, v); }))
+        loadShareCodeMod(mod, modObj);
         c.mods.append(mod);
     }
-    return {};
 }
 
-Result<> loadShareCodeResponse(ShareCodeResponse& r, const QJsonObject& obj)
+void loadShareCodeResponse(ShareCodeResponse& r, QJsonObject& obj)
 {
-    TRY_INTO(r.error, Json::requireBoolean(obj, "error"))
-    TRY_INTO(r.code, Json::requireInteger(obj, "code"))
+    r.error = Json::requireBoolean(obj, "error");
+    r.code = Json::requireInteger(obj, "code");
 
-    if (obj.contains("message") && !obj.value("message").isNull()) {
-        TRY_INTO(r.message, Json::requireString(obj, "message"))
-    }
+    if (obj.contains("message") && !obj.value("message").isNull())
+        r.message = Json::requireString(obj, "message");
 
     if (!r.error) {
-        TRY(Json::requireObject(obj, "data").and_then([&r](const auto& v) { return loadShareCode(r.data, v); }))
+        auto dataRaw = Json::requireObject(obj, "data");
+        loadShareCode(r.data, dataRaw);
     }
-    return {};
 }
 
 }  // namespace ATLauncher

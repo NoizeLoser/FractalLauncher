@@ -12,7 +12,6 @@
             "binaryDir": "build",
             "installDir": "install",
             "generator": "Ninja Multi-Config",
-            "toolchainFile": "cmake/vcpkg/scripts/buildsystems/vcpkg.cmake",
             "cacheVariables": {
                 "Launcher_BUILD_ARTIFACT": "$penv{ARTIFACT_NAME}",
                 "Launcher_BUILD_PLATFORM": "$penv{BUILD_PLATFORM}",
@@ -42,6 +41,9 @@
                 "type": "equals",
                 "lhs": "${hostSystemName}",
                 "rhs": "Darwin"
+            },
+            "cacheVariables": {
+                "CMAKE_TOOLCHAIN_FILE": "$penv{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
             }
         },
         {
@@ -51,6 +53,7 @@
                 "macos"
             ],
             "cacheVariables": {
+                "CMAKE_TOOLCHAIN_FILE": "$penv{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
                 "CMAKE_OSX_ARCHITECTURES": "x86_64;arm64",
                 "VCPKG_TARGET_TRIPLET": "universal-osx"
             }
@@ -77,6 +80,9 @@
                 "type": "equals",
                 "lhs": "${hostSystemName}",
                 "rhs": "Windows"
+            },
+            "cacheVariables": {
+                "CMAKE_TOOLCHAIN_FILE": "$penv{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
             }
         }
     ],

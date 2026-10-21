@@ -48,7 +48,6 @@
 
 #include "Component.h"
 #include "LaunchProfile.h"
-#include "Result.h"
 #include "modplatform/ModIndex.h"
 #include "net/Mode.h"
 
@@ -62,6 +61,19 @@ class PackProfile : public QAbstractListModel {
 
    public:
     enum Columns { NameColumn = 0, VersionColumn, NUM_COLUMNS };
+
+    struct Result {
+        bool success;
+        QString error;
+
+        // Implicit conversion to bool
+        operator bool() const { return success; }
+
+        // Factory methods for convenience
+        static Result Success() { return { true, "" }; }
+
+        static Result Error(const QString& errorMessage) { return { false, errorMessage }; }
+    };
 
     explicit PackProfile(MinecraftInstance* instance);
     virtual ~PackProfile();
@@ -103,7 +115,7 @@ class PackProfile : public QAbstractListModel {
     bool revertToBase(int index);
 
     /// reload the list, reload all components, resolve dependencies
-    Result<> reload(Net::Mode netmode);
+    Result reload(Net::Mode netmode);
 
     // reload all components, resolve dependencies
     void resolve(Net::Mode netmode);
@@ -152,8 +164,6 @@ class PackProfile : public QAbstractListModel {
     /// apply the component patches. Catches all the errors and returns true/false for success/failure
     void invalidateLaunchProfile();
 
-    bool updateLatestMinecraft(bool onlyRelease = true);
-
    private:
     void scheduleSave();
     bool saveIsScheduled() const;
@@ -172,7 +182,7 @@ class PackProfile : public QAbstractListModel {
     void disableInteraction(bool disable);
 
    private:
-    Result<> load();
+    Result load();
     bool installJarMods_internal(QStringList filepaths);
     bool installCustomJar_internal(QString filepath);
     bool installAgents_internal(QStringList filepaths);

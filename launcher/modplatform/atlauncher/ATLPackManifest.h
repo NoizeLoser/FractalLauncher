@@ -40,9 +40,6 @@
 #include <QMap>
 #include <QString>
 
-#include "Result.h"
-#include "modplatform/ModIndex.h"
-
 namespace ATLauncher {
 
 enum class PackType { Public, Private };
@@ -73,7 +70,7 @@ enum class ModType {
 enum class DownloadType { Server, Browser, Direct, Unknown };
 
 struct VersionLoader {
-    ModPlatform::ModLoaderType type;
+    QString type;
     bool latest;
     bool recommended;
     bool choose;
@@ -186,6 +183,6 @@ struct PackVersion {
     VersionDeletes deletes;
 };
 
-Result<> loadVersion(PackVersion& v, const QJsonObject& obj);
+void loadVersion(PackVersion& v, QJsonObject& obj);
 
 }  // namespace ATLauncher

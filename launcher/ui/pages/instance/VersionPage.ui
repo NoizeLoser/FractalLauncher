@@ -27,18 +27,9 @@
     <item>
      <layout class="QVBoxLayout" name="verticalLayout">
       <item>
-       <widget class="QTreeView" name="packageView">
+       <widget class="ModListView" name="packageView">
         <property name="horizontalScrollBarPolicy">
-         <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOff</enum>
-        </property>
-        <property name="alternatingRowColors">
-         <bool>true</bool>
-        </property>
-        <property name="verticalScrollMode">
-         <enum>QAbstractItemView::ScrollMode::ScrollPerPixel</enum>
-        </property>
-        <property name="rootIsDecorated">
-         <bool>false</bool>
+         <enum>Qt::ScrollBarAlwaysOff</enum>
         </property>
         <property name="sortingEnabled">
          <bool>false</bool>
@@ -48,9 +39,6 @@
         </property>
         <attribute name="headerVisible">
          <bool>true</bool>
-        </attribute>
-        <attribute name="headerStretchLastSection">
-         <bool>false</bool>
         </attribute>
        </widget>
       </item>
@@ -80,10 +68,10 @@
     <string>Actions</string>
    </property>
    <property name="allowedAreas">
-    <set>Qt::ToolBarArea::LeftToolBarArea|Qt::ToolBarArea::RightToolBarArea</set>
+    <set>Qt::LeftToolBarArea|Qt::RightToolBarArea</set>
    </property>
    <property name="toolButtonStyle">
-    <enum>Qt::ToolButtonStyle::ToolButtonTextOnly</enum>
+    <enum>Qt::ToolButtonTextOnly</enum>
    </property>
    <property name="floatable">
     <bool>false</bool>
@@ -250,6 +238,11 @@
   </action>
  </widget>
  <customwidgets>
+  <customwidget>
+   <class>ModListView</class>
+   <extends>QTreeView</extends>
+   <header>ui/widgets/ModListView.h</header>
+  </customwidget>
   <customwidget>
    <class>InfoFrame</class>
    <extends>QFrame</extends>

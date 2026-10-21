@@ -63,5 +63,5 @@ class ShaderPackPage : public ExternalResourcesPage {
 
    private:
     ShaderPackFolderModel* m_model;
-    QPointer<ResourceDownload::ResourceDownloadDialog> m_downloadDialog;
+    QPointer<ResourceDownload::ShaderPackDownloadDialog> m_downloadDialog;
 };

@@ -38,7 +38,6 @@
 #include <QJsonValue>
 #include <QTest>
 #include <QTimer>
-#include "Json.h"
 
 #include <FileSystem.h>
 
@@ -51,22 +50,26 @@ class MetaComponentParseTest : public QObject {
     {
         QString source = QFINDTESTDATA("testdata/MetaComponentParse");
 
-        QString compRp = FS::PathCombine(source, name);
+        QString comp_rp = FS::PathCombine(source, name);
 
-        auto doc = Json::requireDocument(compRp);
-        QVERIFY2(doc, doc.has_value() ? "" : qPrintable(doc.error()));
+        QFile file;
+        file.setFileName(comp_rp);
+        QVERIFY(file.open(QIODevice::ReadOnly | QIODevice::Text));
+        QString data = file.readAll();
+        file.close();
 
-        QJsonObject obj = doc->object();
+        QJsonDocument doc = QJsonDocument::fromJson(data.toUtf8());
+        QJsonObject obj = doc.object();
 
-        QJsonValue descriptionJson = obj.value("description");
-        QJsonValue expectedJson = obj.value("expected_output");
+        QJsonValue description_json = obj.value("description");
+        QJsonValue expected_json = obj.value("expected_output");
 
-        QVERIFY(!descriptionJson.isUndefined());
-        QVERIFY(expectedJson.isString());
+        QVERIFY(!description_json.isUndefined());
+        QVERIFY(expected_json.isString());
 
-        QString expected = expectedJson.toString();
+        QString expected = expected_json.toString();
 
-        QString processed = DataPackUtils::processComponent(descriptionJson);
+        QString processed = DataPackUtils::processComponent(description_json);
 
         QCOMPARE(processed, expected);
     }

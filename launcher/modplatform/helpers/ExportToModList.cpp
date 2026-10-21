@@ -20,35 +20,30 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
-namespace {
-QString toHTML(const QList<Mod*>& mods, ExportToModList::OptionalData extraData)
+namespace ExportToModList {
+QString toHTML(QList<Mod*> mods, OptionalData extraData)
 {
     QStringList lines;
-    for (auto* mod : mods) {
+    for (auto mod : mods) {
         auto meta = mod->metadata();
         auto modName = mod->name().toHtmlEscaped();
-        if ((extraData & ExportToModList::Url) != 0) {
+        if (extraData & Url) {
             auto url = mod->homepage().toHtmlEscaped();
-            if (!url.isEmpty()) {
+            if (!url.isEmpty())
                 modName = QString("<a href=\"%1\">%2</a>").arg(url, modName);
-            }
         }
         auto line = modName;
-        if ((extraData & ExportToModList::Version) != 0) {
+        if (extraData & Version) {
             auto ver = mod->version();
-            if (ver.isEmpty() && meta != nullptr) {
+            if (ver.isEmpty() && meta != nullptr)
                 ver = meta->version().toString();
-            }
-            if (!ver.isEmpty()) {
+            if (!ver.isEmpty())
                 line += QString(" [%1]").arg(ver.toHtmlEscaped());
-            }
         }
-        if ((extraData & ExportToModList::Authors) != 0 && !mod->authors().isEmpty()) {
+        if (extraData & Authors && !mod->authors().isEmpty())
             line += " by " + mod->authors().join(", ").toHtmlEscaped();
-        }
-        if ((extraData & ExportToModList::FileName) != 0) {
+        if (extraData & FileName)
             line += QString(" (%1)").arg(mod->fileinfo().fileName().toHtmlEscaped());
-        }
 
         lines.append(QString("<li>%1</li>").arg(line));
     }
@@ -57,109 +52,93 @@ QString toHTML(const QList<Mod*>& mods, ExportToModList::OptionalData extraData)
 
 QString toMarkdownEscaped(QString src)
 {
-    for (auto ch : "\\`*_{}[]<>()#+-.!|") {
+    for (auto ch : "\\`*_{}[]<>()#+-.!|")
         src.replace(ch, QString("\\%1").arg(ch));
-    }
     return src;
 }
 
-QString toMarkdown(const QList<Mod*>& mods, ExportToModList::OptionalData extraData)
+QString toMarkdown(QList<Mod*> mods, OptionalData extraData)
 {
     QStringList lines;
 
-    for (auto* mod : mods) {
+    for (auto mod : mods) {
         auto meta = mod->metadata();
         auto modName = toMarkdownEscaped(mod->name());
-        if ((extraData & ExportToModList::Url) != 0) {
+        if (extraData & Url) {
             auto url = mod->homepage();
-            if (!url.isEmpty()) {
+            if (!url.isEmpty())
                 modName = QString("[%1](%2)").arg(modName, url);
-            }
         }
         auto line = modName;
-        if ((extraData & ExportToModList::Version) != 0) {
+        if (extraData & Version) {
             auto ver = toMarkdownEscaped(mod->version());
-            if (ver.isEmpty() && meta != nullptr) {
+            if (ver.isEmpty() && meta != nullptr)
                 ver = toMarkdownEscaped(meta->version().toString());
-            }
-            if (!ver.isEmpty()) {
+            if (!ver.isEmpty())
                 line += QString(" [%1]").arg(ver);
-            }
         }
-        if ((extraData & ExportToModList::Authors) != 0 && !mod->authors().isEmpty()) {
+        if (extraData & Authors && !mod->authors().isEmpty())
             line += " by " + toMarkdownEscaped(mod->authors().join(", "));
-        }
-        if ((extraData & ExportToModList::FileName) != 0) {
+        if (extraData & FileName)
             line += QString(" (%1)").arg(toMarkdownEscaped(mod->fileinfo().fileName()));
-        }
         lines << "- " + line;
     }
     return lines.join("\n");
 }
 
-QString toPlainTXT(const QList<Mod*>& mods, ExportToModList::OptionalData extraData)
+QString toPlainTXT(QList<Mod*> mods, OptionalData extraData)
 {
     QStringList lines;
-    for (auto* mod : mods) {
+    for (auto mod : mods) {
         auto meta = mod->metadata();
         auto modName = mod->name();
 
         auto line = modName;
-        if ((extraData & ExportToModList::Url) != 0) {
+        if (extraData & Url) {
             auto url = mod->homepage();
-            if (!url.isEmpty()) {
+            if (!url.isEmpty())
                 line += QString(" (%1)").arg(url);
-            }
         }
-        if ((extraData & ExportToModList::Version) != 0) {
+        if (extraData & Version) {
             auto ver = mod->version();
-            if (ver.isEmpty() && meta != nullptr) {
+            if (ver.isEmpty() && meta != nullptr)
                 ver = meta->version().toString();
-            }
-            if (!ver.isEmpty()) {
+            if (!ver.isEmpty())
                 line += QString(" [%1]").arg(ver);
-            }
         }
-        if (((extraData & ExportToModList::Authors) != 0) && !mod->authors().isEmpty()) {
+        if (extraData & Authors && !mod->authors().isEmpty())
             line += " by " + mod->authors().join(", ");
-        }
-        if ((extraData & ExportToModList::FileName) != 0) {
+        if (extraData & FileName)
             line += QString(" (%1)").arg(mod->fileinfo().fileName());
-        }
         lines << line;
     }
     return lines.join("\n");
 }
 
-QString toJSON(const QList<Mod*>& mods, ExportToModList::OptionalData extraData)
+QString toJSON(QList<Mod*> mods, OptionalData extraData)
 {
     QJsonArray lines;
-    for (auto* mod : mods) {
+    for (auto mod : mods) {
         auto meta = mod->metadata();
         auto modName = mod->name();
         QJsonObject line;
         line["name"] = modName;
-        if ((extraData & ExportToModList::Url) != 0) {
+        if (extraData & Url) {
             auto url = mod->homepage();
-            if (!url.isEmpty()) {
+            if (!url.isEmpty())
                 line["url"] = url;
-            }
         }
-        if ((extraData & ExportToModList::Version) != 0) {
+        if (extraData & Version) {
             auto ver = mod->version();
-            if (ver.isEmpty() && meta != nullptr) {
+            if (ver.isEmpty() && meta != nullptr)
                 ver = meta->version().toString();
-            }
-            if (!ver.isEmpty()) {
+            if (!ver.isEmpty())
                 line["version"] = ver;
-            }
         }
-        if (((extraData & ExportToModList::Authors) != 0) && !mod->authors().isEmpty()) {
+        if (extraData & Authors && !mod->authors().isEmpty())
             line["authors"] = QJsonArray::fromStringList(mod->authors());
-        }
-        if ((extraData & ExportToModList::FileName) != 0) {
+        if (extraData & FileName)
             line["filename"] = mod->fileinfo().fileName();
-        }
         lines << line;
     }
     QJsonDocument doc;
@@ -167,45 +146,39 @@ QString toJSON(const QList<Mod*>& mods, ExportToModList::OptionalData extraData)
     return doc.toJson();
 }
 
-QString toCSV(const QList<Mod*>& mods, ExportToModList::OptionalData extraData)
+QString toCSV(QList<Mod*> mods, OptionalData extraData)
 {
     QStringList lines;
-    for (auto* mod : mods) {
+    for (auto mod : mods) {
         QStringList data;
         auto meta = mod->metadata();
         auto modName = mod->name();
 
         data << modName;
-        if ((extraData & ExportToModList::Url) != 0) {
+        if (extraData & Url)
             data << mod->homepage();
-        }
-        if ((extraData & ExportToModList::Version) != 0) {
+        if (extraData & Version) {
             auto ver = mod->version();
-            if (ver.isEmpty() && meta != nullptr) {
+            if (ver.isEmpty() && meta != nullptr)
                 ver = meta->version().toString();
-            }
             data << ver;
         }
-        if ((extraData & ExportToModList::Authors) != 0) {
+        if (extraData & Authors) {
             QString authors;
-            if (mod->authors().length() == 1) {
+            if (mod->authors().length() == 1)
                 authors = mod->authors().back();
-            } else if (mod->authors().length() > 1) {
+            else if (mod->authors().length() > 1)
                 authors = QString("\"%1\"").arg(mod->authors().join(","));
-            }
             data << authors;
         }
-        if ((extraData & ExportToModList::FileName) != 0) {
+        if (extraData & FileName)
             data << mod->fileinfo().fileName();
-        }
         lines << data.join(",");
     }
     return lines.join("\n");
 }
-}  // namespace
-namespace ExportToModList {
 
-QString exportToModList(const QList<Mod*>& mods, Formats format, OptionalData extraData)
+QString exportToModList(QList<Mod*> mods, Formats format, OptionalData extraData)
 {
     switch (format) {
         case HTML:
@@ -224,18 +197,17 @@ QString exportToModList(const QList<Mod*>& mods, Formats format, OptionalData ex
     }
 }
 
-QString exportToModList(const QList<Mod*>& mods, const QString& lineTemplate)
+QString exportToModList(QList<Mod*> mods, QString lineTemplate)
 {
     QStringList lines;
-    for (auto* mod : mods) {
+    for (auto mod : mods) {
         auto meta = mod->metadata();
         auto modName = mod->name();
-        auto modID = mod->modId();
+        auto modID = mod->mod_id();
         auto url = mod->homepage();
         auto ver = mod->version();
-        if (ver.isEmpty() && meta != nullptr) {
+        if (ver.isEmpty() && meta != nullptr)
             ver = meta->version().toString();
-        }
         auto authors = mod->authors().join(", ");
         auto filename = mod->fileinfo().fileName();
         lines << QString(lineTemplate)

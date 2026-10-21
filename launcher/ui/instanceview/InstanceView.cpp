@@ -511,7 +511,8 @@ void InstanceView::paintEvent([[maybe_unused]] QPaintEvent* event)
 
     int wpWidth = viewport()->width();
     option.rect.setWidth(wpWidth);
-    for (auto* category : m_groups) {
+    for (int i = 0; i < m_groups.size(); ++i) {
+        VisualGroup* category = m_groups.at(i);
         int y = category->verticalPosition();
         y -= verticalOffset();
         QRect backup = option.rect;
@@ -521,6 +522,7 @@ void InstanceView::paintEvent([[maybe_unused]] QPaintEvent* event)
         option.rect.setLeft(m_leftMargin);
         option.rect.setRight(wpWidth - m_rightMargin);
         category->drawHeader(&painter, option);
+        y += category->totalHeight() + m_categoryMargin;
         option.rect = backup;
     }
 

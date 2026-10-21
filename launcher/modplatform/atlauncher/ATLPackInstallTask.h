@@ -121,32 +121,30 @@ class PackInstallTask : public InstanceTask {
    private:
     UserInteractionSupport* m_support;
 
-    bool m_abortable = false;
+    bool abortable = false;
 
-    NetJob::Ptr m_jobPtr;
+    NetJob::Ptr jobPtr;
 
-    InstallMode m_installMode;
-    QString m_packName;
-    QString m_packSafeName;
-    QString m_versionName;
+    InstallMode m_install_mode;
+    QString m_pack_name;
+    QString m_pack_safe_name;
+    QString m_version_name;
     PackVersion m_version;
 
-    QMap<QString, VersionMod> m_modsToExtract;
-    QMap<QString, VersionMod> m_modsToDecomp;
-    QMap<QString, QString> m_modsToCopy;
+    QMap<QString, VersionMod> modsToExtract;
+    QMap<QString, VersionMod> modsToDecomp;
+    QMap<QString, QString> modsToCopy;
 
-    QString m_archivePath;
-    QStringList m_jarmods;
-    Meta::Version::Ptr m_minecraftVersion;
-    QMap<QString, Meta::Version::Ptr> m_componentsToInstall;
+    QString archivePath;
+    QStringList jarmods;
+    Meta::Version::Ptr minecraftVersion;
+    QMap<QString, Meta::Version::Ptr> componentsToInstall;
 
-    QFuture<Result<QStringList>> m_extractFuture;
-    QFutureWatcher<Result<QStringList>> m_extractFutureWatcher;
+    QFuture<std::optional<QStringList>> m_extractFuture;
+    QFutureWatcher<std::optional<QStringList>> m_extractFutureWatcher;
 
     QFuture<bool> m_modExtractFuture;
     QFutureWatcher<bool> m_modExtractFutureWatcher;
-
-    std::unique_ptr<MinecraftInstance> m_instance;
 };
 
 }  // namespace ATLauncher

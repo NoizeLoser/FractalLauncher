@@ -42,18 +42,18 @@
 namespace Net {
 class MetaCacheSink : public FileSink {
    public:
-    MetaCacheSink(MetaEntryPtr entry, ChecksumValidator* md5sum, bool isEternal = false);
-    ~MetaCacheSink() override = default;
+    MetaCacheSink(MetaEntryPtr entry, ChecksumValidator* md5sum, bool is_eternal = false);
+    virtual ~MetaCacheSink() = default;
 
     auto hasLocalData() -> bool override;
 
    protected:
-    InitResult initCache(QNetworkRequest& request) override;
-    Result<> finalizeCache(QNetworkReply& reply) override;
+    auto initCache(QNetworkRequest& request) -> Task::State override;
+    auto finalizeCache(QNetworkReply& reply) -> Task::State override;
 
    private:
     MetaEntryPtr m_entry;
     ChecksumValidator* m_md5Node;
-    bool m_isEternal;
+    bool m_is_eternal;
 };
 }  // namespace Net

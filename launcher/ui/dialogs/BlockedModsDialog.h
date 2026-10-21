@@ -56,7 +56,7 @@ class BlockedModsDialog : public QDialog {
     Q_OBJECT
 
    public:
-    BlockedModsDialog(QWidget* parent, const QString& title, const QString& text, QList<BlockedMod>& mods, QString hashType = "sha1");
+    BlockedModsDialog(QWidget* parent, const QString& title, const QString& text, QList<BlockedMod>& mods, QString hash_type = "sha1");
 
     ~BlockedModsDialog() override;
 
@@ -68,30 +68,31 @@ class BlockedModsDialog : public QDialog {
     void done(int r) override;
 
    private:
-    Ui::BlockedModsDialog* m_ui;
+    Ui::BlockedModsDialog* ui;
     QList<BlockedMod>& m_mods;
     QFileSystemWatcher m_watcher;
     shared_qobject_ptr<ConcurrentTask> m_hashingTask;
     QSet<QString> m_pendingHashPaths;
-    bool m_rehashPending = false;
+    bool m_rehashPending;
     QString m_hashType;
 
     void openAll(bool missingOnly);
     void addDownloadFolder();
     void update();
-    void directoryChanged(const QString& path);
+    void directoryChanged(QString path);
     void setupWatch();
-    void watchPath(const QString& path, bool watchRecursive = false);
+    void watchPath(QString path, bool watch_recursive = false);
     void scanPaths();
-    void scanPath(const QString& path, bool startTask);
-    void addHashTask(const QString& path);
-    void buildHashTask(const QString& path);
-    void checkMatchHash(const QString& hash, const QString& path);
+    void scanPath(QString path, bool start_task);
+    void addHashTask(QString path);
+    void buildHashTask(QString path);
+    void checkMatchHash(QString hash, QString path);
     void validateMatchedMods();
     void runHashTask();
     void hashTaskFinished();
 
-    bool checkValidPath(const QString& path);
+    bool checkValidPath(QString path);
+    bool allModsMatched();
 };
 
 QDebug operator<<(QDebug debug, const BlockedMod& m);

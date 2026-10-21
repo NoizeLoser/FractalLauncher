@@ -62,7 +62,8 @@
 #include "ui/dialogs/ProgressDialog.h"
 
 #include "net/NetJob.h"
-#include "screenshots/ImgurAPI.h"
+#include "screenshots/ImgurAlbumCreation.h"
+#include "screenshots/ImgurUpload.h"
 #include "tasks/SequentialTask.h"
 
 #include <DesktopServices.h>
@@ -425,23 +426,27 @@ void ScreenshotsPage::on_actionUpload_triggered()
     auto job = NetJob::Ptr(new NetJob("Screenshot Upload", APPLICATION->network()));
 
     ProgressDialog dialog(this);
-    dialog.showSkipButton();
+    dialog.setSkipButton(true, tr("Abort"));
 
     if (selection.size() < 2) {
         auto item = selection.at(0);
         auto info = m_model->fileInfo(item);
         auto screenshot = std::make_shared<ScreenShot>(info);
-        auto [uploadRequest, result] = ImgurAPI::makeUpload(screenshot);
-        job->addNetAction(uploadRequest);
+        job->addNetAction(ImgurUpload::make(screenshot));
 
-        connect(job.get(), &Task::failed, this, [this](const QString& reason) {
+        connect(job.get(), &Task::failed, [this](const QString& reason) {
             CustomMessageBox::selectable(this, tr("Failed to upload screenshots!"), reason, QMessageBox::Critical)->show();
+        });
+        connect(job.get(), &Task::aborted, [this] {
+            CustomMessageBox::selectable(this, tr("Screenshots upload aborted"), tr("The task has been aborted by the user."),
+                                         QMessageBox::Information)
+                ->show();
         });
 
         m_uploadActive = true;
 
         if (dialog.execWithTask(job.get()) == QDialog::Accepted) {
-            auto link = *result;
+            auto link = screenshot->m_url;
             QClipboard* clipboard = QApplication::clipboard();
             qDebug() << "ImgurUpload link" << link;
             clipboard->setText(link);
@@ -460,26 +465,31 @@ void ScreenshotsPage::on_actionUpload_triggered()
         auto info = m_model->fileInfo(item);
         auto screenshot = std::make_shared<ScreenShot>(info);
         uploaded.push_back(screenshot);
-        auto uploadRequest = ImgurAPI::makeUpload(screenshot).first;
-        job->addNetAction(uploadRequest);
+        job->addNetAction(ImgurUpload::make(screenshot));
     }
     SequentialTask task;
     auto albumTask = NetJob::Ptr(new NetJob("Imgur Album Creation", APPLICATION->network()));
-    auto [imgurAlbum, result] = ImgurAPI::makeAlbum(uploaded);
+    auto imgurResult = std::make_shared<ImgurAlbumCreation::Result>();
+    auto imgurAlbum = ImgurAlbumCreation::make(imgurResult, uploaded);
     albumTask->addNetAction(imgurAlbum);
     task.addTask(job);
     task.addTask(albumTask);
 
-    connect(&task, &Task::failed, this, [this](const QString& reason) {
+    connect(&task, &Task::failed, [this](const QString& reason) {
         CustomMessageBox::selectable(this, tr("Failed to upload screenshots!"), reason, QMessageBox::Critical)->show();
+    });
+    connect(&task, &Task::aborted, [this] {
+        CustomMessageBox::selectable(this, tr("Screenshots upload aborted"), tr("The task has been aborted by the user."),
+                                     QMessageBox::Information)
+            ->show();
     });
 
     m_uploadActive = true;
     if (dialog.execWithTask(&task) == QDialog::Accepted) {
-        if (result->id.isEmpty()) {
+        if (imgurResult->id.isEmpty()) {
             CustomMessageBox::selectable(this, tr("Failed to upload screenshots!"), tr("Unknown error"), QMessageBox::Warning)->exec();
         } else {
-            auto link = QString("https://imgur.com/a/%1").arg(result->id);
+            auto link = QString("https://imgur.com/a/%1").arg(imgurResult->id);
             qDebug() << "ImgurUpload link" << link;
             QClipboard* clipboard = QApplication::clipboard();
             clipboard->setText(link);
@@ -588,6 +598,16 @@ void ScreenshotsPage::openedImpl()
             ui->listView->setModel(nullptr);
         }
     }
+
+    const auto setting_name = QString("WideBarVisibility_%1").arg(id());
+    m_wide_bar_setting = APPLICATION->settings()->getOrRegisterSetting(setting_name);
+
+    ui->toolBar->setVisibilityState(QByteArray::fromBase64(m_wide_bar_setting->get().toString().toUtf8()));
+}
+
+void ScreenshotsPage::closedImpl()
+{
+    m_wide_bar_setting->set(QString::fromUtf8(ui->toolBar->getVisibilityState().toBase64()));
 }
 
 #include "ScreenshotsPage.moc"

@@ -17,45 +17,41 @@
  */
 
 #include "DataPackPage.h"
+#include "minecraft/PackProfile.h"
 #include "ui_ExternalResourcesPage.h"
 
-#include "minecraft/PackProfile.h"
-#include "settings/Setting.h"
 #include "ui/dialogs/CustomMessageBox.h"
 #include "ui/dialogs/ProgressDialog.h"
 #include "ui/dialogs/ResourceDownloadDialog.h"
 #include "ui/dialogs/ResourceUpdateDialog.h"
 
-DataPackPage::DataPackPage(MinecraftInstance* instance, DataPackFolderModel* model, QWidget* parent)
+DataPackPage::DataPackPage(BaseInstance* instance, DataPackFolderModel* model, QWidget* parent)
     : ExternalResourcesPage(instance, model, parent), m_model(model)
 {
-    m_ui->actionDownloadItem->setText(tr("Download Packs"));
-    m_ui->actionDownloadItem->setToolTip(tr("Download data packs from online mod platforms"));
-    m_ui->actionDownloadItem->setEnabled(true);
-    m_ui->actionsToolbar->insertActionBefore(m_ui->actionAddItem, m_ui->actionDownloadItem);
+    ui->actionDownloadItem->setText(tr("Download Packs"));
+    ui->actionDownloadItem->setToolTip(tr("Download data packs from online mod platforms"));
+    ui->actionDownloadItem->setEnabled(true);
+    ui->actionsToolbar->insertActionBefore(ui->actionAddItem, ui->actionDownloadItem);
 
-    connect(m_ui->actionDownloadItem, &QAction::triggered, this, &DataPackPage::downloadDataPacks);
+    connect(ui->actionDownloadItem, &QAction::triggered, this, &DataPackPage::downloadDataPacks);
 
-    m_ui->actionUpdateItem->setToolTip(tr("Try to check or update all selected data packs (all data packs if none are selected)"));
-    connect(m_ui->actionUpdateItem, &QAction::triggered, this, &DataPackPage::updateDataPacks);
-    m_ui->actionsToolbar->insertActionBefore(m_ui->actionAddItem, m_ui->actionUpdateItem);
+    ui->actionUpdateItem->setToolTip(tr("Try to check or update all selected data packs (all data packs if none are selected)"));
+    connect(ui->actionUpdateItem, &QAction::triggered, this, &DataPackPage::updateDataPacks);
+    ui->actionsToolbar->insertActionBefore(ui->actionAddItem, ui->actionUpdateItem);
 
     auto* updateMenu = new QMenu(this);
 
-    auto* update = updateMenu->addAction(m_ui->actionUpdateItem->text());
+    auto* update = updateMenu->addAction(ui->actionUpdateItem->text());
     connect(update, &QAction::triggered, this, &DataPackPage::updateDataPacks);
 
-    updateMenu->addAction(m_ui->actionResetItemMetadata);
-    connect(m_ui->actionResetItemMetadata, &QAction::triggered, this, &DataPackPage::deleteDataPackMetadata);
+    updateMenu->addAction(ui->actionResetItemMetadata);
+    connect(ui->actionResetItemMetadata, &QAction::triggered, this, &DataPackPage::deleteDataPackMetadata);
 
-    m_ui->actionUpdateItem->setMenu(updateMenu);
+    ui->actionUpdateItem->setMenu(updateMenu);
 
-    m_ui->actionChangeVersion->setToolTip(tr("Change a data pack's version."));
-    connect(m_ui->actionChangeVersion, &QAction::triggered, this, &DataPackPage::changeDataPackVersion);
-    m_ui->actionsToolbar->insertActionAfter(m_ui->actionUpdateItem, m_ui->actionChangeVersion);
-
-    m_ui->actionsToolbar->insertActionAfter(m_ui->actionChangeVersion, m_ui->actionLockUpdates);
-    m_ui->actionsToolbar->insertActionAfter(m_ui->actionLockUpdates, m_ui->actionUnlockUpdates);
+    ui->actionChangeVersion->setToolTip(tr("Change a data pack's version."));
+    connect(ui->actionChangeVersion, &QAction::triggered, this, &DataPackPage::changeDataPackVersion);
+    ui->actionsToolbar->insertActionAfter(ui->actionUpdateItem, ui->actionChangeVersion);
 }
 
 void DataPackPage::updateFrame(const QModelIndex& current, [[maybe_unused]] const QModelIndex& previous)
@@ -63,12 +59,16 @@ void DataPackPage::updateFrame(const QModelIndex& current, [[maybe_unused]] cons
     auto sourceCurrent = m_filterModel->mapToSource(current);
     int row = sourceCurrent.row();
     auto& dp = m_model->at(row);
-    m_ui->frame->updateWithDataPack(dp);
+    ui->frame->updateWithDataPack(dp);
 }
 
 void DataPackPage::downloadDataPacks()
 {
-    m_downloadDialog = ResourceDownload::ResourceDownloadDialog::createDataPack(this, m_model, m_instance);
+    if (m_instance->typeName() != "Minecraft") {
+        return;  // this is a null instance or a legacy instance
+    }
+
+    m_downloadDialog = new ResourceDownload::DataPackDownloadDialog(this, m_model, m_instance);
     connect(this, &QObject::destroyed, m_downloadDialog, &QDialog::close);
     connect(m_downloadDialog, &QDialog::finished, this, &DataPackPage::downloadDialogFinished);
 
@@ -78,27 +78,35 @@ void DataPackPage::downloadDataPacks()
 void DataPackPage::downloadDialogFinished(int result)
 {
     if (result != 0) {
-        ConcurrentTask tasks(tr("Download Data Packs"), APPLICATION->settings()->get("NumberOfConcurrentDownloads").toInt());
-        connect(&tasks, &Task::failed, this,
-                [this](const QString& reason) { CustomMessageBox::selectable(this, tr("Error"), reason, QMessageBox::Critical)->show(); });
-        connect(&tasks, &Task::succeeded, this, [this, &tasks]() {
-            QStringList warnings = tasks.warnings();
+        auto* tasks = new ConcurrentTask(tr("Download Data Packs"), APPLICATION->settings()->get("NumberOfConcurrentDownloads").toInt());
+        connect(tasks, &Task::failed, [this, tasks](const QString& reason) {
+            CustomMessageBox::selectable(this, tr("Error"), reason, QMessageBox::Critical)->show();
+            tasks->deleteLater();
+        });
+        connect(tasks, &Task::aborted, [this, tasks]() {
+            CustomMessageBox::selectable(this, tr("Aborted"), tr("Download stopped by user."), QMessageBox::Information)->show();
+            tasks->deleteLater();
+        });
+        connect(tasks, &Task::succeeded, [this, tasks]() {
+            QStringList warnings = tasks->warnings();
             if (warnings.count()) {
                 CustomMessageBox::selectable(this, tr("Warnings"), warnings.join('\n'), QMessageBox::Warning)->show();
             }
+
+            tasks->deleteLater();
         });
 
         if (m_downloadDialog) {
             for (auto& task : m_downloadDialog->getTasks()) {
-                tasks.addTask(task);
+                tasks->addTask(task);
             }
         } else {
             qWarning() << "ResourceDownloadDialog vanished before we could collect tasks!";
         }
 
         ProgressDialog loadDialog(this);
-        loadDialog.showSkipButton();
-        loadDialog.execWithTask(&tasks);
+        loadDialog.setSkipButton(true, tr("Abort"));
+        loadDialog.execWithTask(tasks);
 
         m_model->update();
     }
@@ -109,6 +117,10 @@ void DataPackPage::downloadDialogFinished(int result)
 
 void DataPackPage::updateDataPacks()
 {
+    if (m_instance->typeName() != "Minecraft") {
+        return;  // this is a null instance or a legacy instance
+    }
+
     if (APPLICATION->settings()->get("ModMetadataDisabled").toBool()) {
         QMessageBox::critical(this, tr("Error"), tr("Data pack updates are unavailable when metadata is disabled!"));
         return;
@@ -126,7 +138,7 @@ void DataPackPage::updateDataPacks()
             return;
         }
     }
-    auto selection = m_filterModel->mapSelectionToSource(m_ui->treeView->selectionModel()->selection()).indexes();
+    auto selection = m_filterModel->mapSelectionToSource(ui->treeView->selectionModel()->selection()).indexes();
 
     auto modsList = m_model->selectedResources(selection);
     bool useAll = modsList.empty();
@@ -138,6 +150,7 @@ void DataPackPage::updateDataPacks()
     updateDialog.checkCandidates();
 
     if (updateDialog.aborted()) {
+        CustomMessageBox::selectable(this, tr("Aborted"), tr("The data pack updater was aborted!"), QMessageBox::Warning)->show();
         return;
     }
     if (updateDialog.noUpdates()) {
@@ -154,23 +167,30 @@ void DataPackPage::updateDataPacks()
     }
 
     if (updateDialog.exec() != 0) {
-        ConcurrentTask tasks("Download Data Packs", APPLICATION->settings()->get("NumberOfConcurrentDownloads").toInt());
-        connect(&tasks, &Task::failed, this,
-                [this](const QString& reason) { CustomMessageBox::selectable(this, tr("Error"), reason, QMessageBox::Critical)->show(); });
-        connect(&tasks, &Task::succeeded, this, [this, &tasks]() {
-            QStringList warnings = tasks.warnings();
+        auto* tasks = new ConcurrentTask("Download Data Packs", APPLICATION->settings()->get("NumberOfConcurrentDownloads").toInt());
+        connect(tasks, &Task::failed, [this, tasks](const QString& reason) {
+            CustomMessageBox::selectable(this, tr("Error"), reason, QMessageBox::Critical)->show();
+            tasks->deleteLater();
+        });
+        connect(tasks, &Task::aborted, [this, tasks]() {
+            CustomMessageBox::selectable(this, tr("Aborted"), tr("Download stopped by user."), QMessageBox::Information)->show();
+            tasks->deleteLater();
+        });
+        connect(tasks, &Task::succeeded, [this, tasks]() {
+            QStringList warnings = tasks->warnings();
             if (warnings.count()) {
                 CustomMessageBox::selectable(this, tr("Warnings"), warnings.join('\n'), QMessageBox::Warning)->show();
             }
+            tasks->deleteLater();
         });
 
         for (const auto& task : updateDialog.getTasks()) {
-            tasks.addTask(task);
+            tasks->addTask(task);
         }
 
         ProgressDialog loadDialog(this);
-        loadDialog.showSkipButton();
-        loadDialog.execWithTask(&tasks);
+        loadDialog.setSkipButton(true, tr("Abort"));
+        loadDialog.execWithTask(tasks);
 
         m_model->update();
     }
@@ -178,7 +198,7 @@ void DataPackPage::updateDataPacks()
 
 void DataPackPage::deleteDataPackMetadata()
 {
-    auto selection = m_filterModel->mapSelectionToSource(m_ui->treeView->selectionModel()->selection()).indexes();
+    auto selection = m_filterModel->mapSelectionToSource(ui->treeView->selectionModel()->selection()).indexes();
     auto selectionCount = m_model->selectedDataPacks(selection).length();
     if (selectionCount == 0) {
         return;
@@ -201,12 +221,16 @@ void DataPackPage::deleteDataPackMetadata()
 
 void DataPackPage::changeDataPackVersion()
 {
+    if (m_instance->typeName() != "Minecraft") {
+        return;  // this is a null instance or a legacy instance
+    }
+
     if (APPLICATION->settings()->get("ModMetadataDisabled").toBool()) {
         QMessageBox::critical(this, tr("Error"), tr("Data pack updates are unavailable when metadata is disabled!"));
         return;
     }
 
-    const QModelIndexList rows = m_ui->treeView->selectionModel()->selectedRows();
+    const QModelIndexList rows = ui->treeView->selectionModel()->selectedRows();
 
     if (rows.count() != 1) {
         return;
@@ -218,26 +242,34 @@ void DataPackPage::changeDataPackVersion()
         return;
     }
 
-    m_downloadDialog = ResourceDownload::ResourceDownloadDialog::createDataPack(this, m_model, m_instance, true);
-    m_downloadDialog->setResourceMetadata(resource.metadata());
-    if (m_downloadDialog->exec() != 0) {
-        ConcurrentTask tasks("Download Data Packs", APPLICATION->settings()->get("NumberOfConcurrentDownloads").toInt());
-        connect(&tasks, &Task::failed, this,
-                [this](const QString& reason) { CustomMessageBox::selectable(this, tr("Error"), reason, QMessageBox::Critical)->show(); });
-        connect(&tasks, &Task::succeeded, this, [this, &tasks]() {
-            QStringList warnings = tasks.warnings();
+    ResourceDownload::DataPackDownloadDialog mdownload(this, m_model, m_instance, true);
+    mdownload.setResourceMetadata(resource.metadata());
+    if (mdownload.exec() != 0) {
+        auto* tasks = new ConcurrentTask("Download Data Packs", APPLICATION->settings()->get("NumberOfConcurrentDownloads").toInt());
+        connect(tasks, &Task::failed, [this, tasks](const QString& reason) {
+            CustomMessageBox::selectable(this, tr("Error"), reason, QMessageBox::Critical)->show();
+            tasks->deleteLater();
+        });
+        connect(tasks, &Task::aborted, [this, tasks]() {
+            CustomMessageBox::selectable(this, tr("Aborted"), tr("Download stopped by user."), QMessageBox::Information)->show();
+            tasks->deleteLater();
+        });
+        connect(tasks, &Task::succeeded, [this, tasks]() {
+            QStringList warnings = tasks->warnings();
             if (warnings.count()) {
                 CustomMessageBox::selectable(this, tr("Warnings"), warnings.join('\n'), QMessageBox::Warning)->show();
             }
+
+            tasks->deleteLater();
         });
 
-        for (auto& task : m_downloadDialog->getTasks()) {
-            tasks.addTask(task);
+        for (auto& task : mdownload.getTasks()) {
+            tasks->addTask(task);
         }
 
         ProgressDialog loadDialog(this);
-        loadDialog.showSkipButton();
-        loadDialog.execWithTask(&tasks);
+        loadDialog.setSkipButton(true, tr("Abort"));
+        loadDialog.execWithTask(tasks);
 
         m_model->update();
     }

@@ -20,78 +20,58 @@
 #include <QList>
 #include <QMimeData>
 #include <QString>
-#include <memory>
 #include "BaseInstance.h"
 #include "minecraft/World.h"
 
 class QFileSystemWatcher;
-class Task;
 
 class WorldList : public QAbstractListModel {
     Q_OBJECT
    public:
-    enum Columns : std::uint8_t { NameColumn, GameModeColumn, LastPlayedColumn, SizeColumn, InfoColumn };
+    enum Columns { NameColumn, GameModeColumn, LastPlayedColumn, SizeColumn, InfoColumn };
 
-    enum Roles : std::uint16_t {
-        ObjectRole = Qt::UserRole + 1,
-        FolderRole,
-        SeedRole,
-        NameRole,
-        GameModeRole,
-        LastPlayedRole,
-        SizeRole,
-        IconFileRole
-    };
+    enum Roles { ObjectRole = Qt::UserRole + 1, FolderRole, SeedRole, NameRole, GameModeRole, LastPlayedRole, SizeRole, IconFileRole };
 
     WorldList(const QString& dir, BaseInstance* instance);
 
-    QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
+    virtual QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const;
 
-    int rowCount(const QModelIndex& parent = QModelIndex()) const override { return parent.isValid() ? 0 : static_cast<int>(size()); };
-    QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override;
-    int columnCount(const QModelIndex& parent) const override;
+    virtual int rowCount(const QModelIndex& parent = QModelIndex()) const { return parent.isValid() ? 0 : static_cast<int>(size()); };
+    virtual QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const;
+    virtual int columnCount(const QModelIndex& parent) const;
 
-    qsizetype size() const { return m_worlds.size(); };
+    size_t size() const { return m_worlds.size(); };
     bool empty() const { return size() == 0; }
-    World& operator[](qsizetype index) { return m_worlds[index]; }
+    World& operator[](size_t index) { return m_worlds[index]; }
 
     /// Reloads the mod list and returns true if the list changed.
     virtual bool update();
 
     /// Install a world from location
-    void installWorld(const QFileInfo& filename);
+    void installWorld(QFileInfo filename);
 
-    /// Create a task to install a world from location
-    std::unique_ptr<Task> createInstallWorldTask(const QFileInfo& filename);
-
-    /// Create a task to copy the world at the given index.
-    std::unique_ptr<Task> createCopyWorldTask(int index, const QString& name);
-
-    /// Create a task to delete the world at the given index.
-    std::unique_ptr<Task> createDeleteWorldTask(int index);
-
-    /// Remove an already deleted world from the model.
-    bool removeWorldFromModel(const QFileInfo& sourceFile);
+    /// Deletes the mod at the given index.
+    virtual bool deleteWorld(int index);
 
     /// Removes the world icon, if any
-    virtual bool resetIcon(int row);
+    virtual bool resetIcon(int index);
 
     /// Deletes all the selected mods
     virtual bool deleteWorlds(int first, int last);
 
     /// flags, mostly to support drag&drop
-    Qt::ItemFlags flags(const QModelIndex& index) const override;
+    virtual Qt::ItemFlags flags(const QModelIndex& index) const;
     /// get data for drag action
-    QMimeData* mimeData(const QModelIndexList& indexes) const override;
+    virtual QMimeData* mimeData(const QModelIndexList& indexes) const;
     /// get the supported mime types
-    QStringList mimeTypes() const override;
+    virtual QStringList mimeTypes() const;
     /// process data from drop action
-    bool dropMimeData(const QMimeData* data, Qt::DropAction action, int row, int column, const QModelIndex& parent) override;
+    virtual bool dropMimeData(const QMimeData* data, Qt::DropAction action, int row, int column, const QModelIndex& parent);
     /// what drag actions do we support?
-    Qt::DropActions supportedDragActions() const override;
+    virtual Qt::DropActions supportedDragActions() const;
 
     /// what drop actions do we support?
-    Qt::DropActions supportedDropActions() const override;
+    virtual Qt::DropActions supportedDropActions() const;
 
     void startWatching();
     void stopWatching();
@@ -105,7 +85,7 @@ class WorldList : public QAbstractListModel {
     const QList<World>& allWorlds() const { return m_worlds; }
 
    private slots:
-    void directoryChanged(const QString& path);
+    void directoryChanged(QString path);
     void loadWorldsAsync();
 
    signals:

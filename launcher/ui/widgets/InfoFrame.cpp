@@ -48,7 +48,7 @@
 
 void setupLinkToolTip(QLabel* label)
 {
-    QObject::connect(label, &QLabel::linkHovered, label, [label](const QString& link) {
+    QObject::connect(label, &QLabel::linkHovered, [label](const QString& link) {
         if (auto url = QUrl(link); !url.isValid() || (url.scheme() != "http" && url.scheme() != "https"))
             return;
         label->setToolTip(link);
@@ -78,11 +78,16 @@ InfoFrame::~InfoFrame()
 
 void InfoFrame::updateWithMod(const Mod& m)
 {
+    if (m.type() == ResourceType::FOLDER) {
+        clear();
+        return;
+    }
+
     QString text = "";
     QString name = "";
     QString link = m.homepage();
     if (m.name().isEmpty())
-        name = m.internalId();
+        name = m.internal_id();
     else
         name = renderColorCodes(m.name());
 
@@ -102,7 +107,7 @@ void InfoFrame::updateWithMod(const Mod& m)
         setDescription(renderColorCodes(m.description()));
     }
 
-    setImage(m.icon({ 64, 64 }, Qt::KeepAspectRatio));
+    setImage(m.icon({ 64, 64 }));
 
     auto licenses = m.licenses();
     QString licenseText = "";
@@ -221,14 +226,14 @@ void InfoFrame::updateWithResourcePack(ResourcePack& resource_pack)
 
     setName(name);
     setDescription(renderColorCodes(resource_pack.description()));
-    setImage(resource_pack.image({ 64, 64 }, Qt::KeepAspectRatio));
+    setImage(resource_pack.image({ 64, 64 }));
 }
 
 void InfoFrame::updateWithDataPack(DataPack& data_pack)
 {
     setName(renderColorCodes(data_pack.name()));
     setDescription(renderColorCodes(data_pack.description()));
-    setImage(data_pack.image({ 64, 64 }, Qt::KeepAspectRatio));
+    setImage(data_pack.image({ 64, 64 }));
 }
 
 void InfoFrame::updateWithTexturePack(TexturePack& texture_pack)
@@ -242,7 +247,7 @@ void InfoFrame::updateWithTexturePack(TexturePack& texture_pack)
 
     setName(name);
     setDescription(renderColorCodes(texture_pack.description()));
-    setImage(texture_pack.image({ 64, 64 }, Qt::KeepAspectRatio));
+    setImage(texture_pack.image({ 64, 64 }));
 }
 
 void InfoFrame::clear()

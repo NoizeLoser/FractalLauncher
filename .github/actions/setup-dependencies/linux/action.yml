@@ -12,7 +12,8 @@ runs:
         sudo apt-get -y install \
           dpkg-dev \
           ninja-build extra-cmake-modules pkg-config scdoc \
-          gamemode-dev libxcb-cursor-dev
+          cmark gamemode-dev libarchive-dev libcmark-dev libqrencode-dev zlib1g-dev \
+          libxcb-cursor-dev libtomlplusplus-dev
 
     - name: Setup AppImage tooling
       shell: bash

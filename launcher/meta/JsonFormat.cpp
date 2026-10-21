@@ -15,8 +15,6 @@
 
 #include "JsonFormat.h"
 
-#include <algorithm>
-
 // FIXME: remove this from here... somehow
 #include "Json.h"
 #include "minecraft/OneSixVersionFormat.h"
@@ -27,135 +25,137 @@
 
 using namespace Json;
 
-namespace {
-// Index
-Result<std::shared_ptr<Meta::Index>> parseIndexInternal(const QJsonObject& obj)
+namespace Meta {
+
+MetadataVersion currentFormatVersion()
 {
-    TRY_INTO(const auto& objects, requireIsArrayOf<QJsonObject>(obj, "packages"))
+    return MetadataVersion::InitialRelease;
+}
 
-    QList<Meta::VersionList::Ptr> lists;
+// Index
+static std::shared_ptr<Index> parseIndexInternal(const QJsonObject& obj)
+{
+    const QList<QJsonObject> objects = requireIsArrayOf<QJsonObject>(obj, "packages");
+    QList<VersionList::Ptr> lists;
     lists.reserve(objects.size());
-
-    for (const auto& entry : objects) {
-        TRY_INTO(const auto& uid, requireString(entry, "uid"))
-
-        auto list = std::make_shared<Meta::VersionList>(uid);
-        list->setName(entry["name"].toString());
-        list->setSha256(entry["sha256"].toString());
-
-        lists.push_back(list);
-    }
-    return std::make_shared<Meta::Index>(lists);
+    std::transform(objects.begin(), objects.end(), std::back_inserter(lists), [](const QJsonObject& obj) {
+        VersionList::Ptr list = std::make_shared<VersionList>(requireString(obj, "uid"));
+        list->setName(obj["name"].toString());
+        list->setSha256(obj["sha256"].toString());
+        return list;
+    });
+    return std::make_shared<Index>(lists);
 }
 
 // Version
-Result<Meta::Version::Ptr> parseCommonVersion(const QString& uid, const QJsonObject& obj)
+static Version::Ptr parseCommonVersion(const QString& uid, const QJsonObject& obj)
 {
-    TRY_INTO(const auto& versionRes, requireString(obj, "version"))
-    TRY_INTO(const auto& releaseTime, requireString(obj, "releaseTime"))
-
-    auto version = std::make_shared<Meta::Version>(uid, versionRes);
-    version->setTime(QDateTime::fromString(releaseTime, Qt::ISODate).toMSecsSinceEpoch() / 1000);
+    Version::Ptr version = std::make_shared<Version>(uid, requireString(obj, "version"));
+    version->setTime(QDateTime::fromString(requireString(obj, "releaseTime"), Qt::ISODate).toMSecsSinceEpoch() / 1000);
     version->setType(obj["type"].toString());
     version->setRecommended(obj["recommended"].toBool());
     version->setVolatile(obj["volatile"].toBool());
-
-    Meta::RequireSet reqs;
-    Meta::RequireSet conflicts;
-    TRY(parseRequires(obj, &reqs, "requires"))
-    TRY(parseRequires(obj, &conflicts, "conflicts"))
+    RequireSet reqs, conflicts;
+    parseRequires(obj, &reqs, "requires");
+    parseRequires(obj, &conflicts, "conflicts");
     version->setRequires(reqs, conflicts);
-
     if (auto sha256 = obj["sha256"].toString(); !sha256.isEmpty()) {
         version->setSha256(sha256);
     }
     return version;
 }
 
-Result<Meta::Version::Ptr> parseVersionInternal(const QJsonObject& obj)
+static Version::Ptr parseVersionInternal(const QJsonObject& obj)
 {
-    TRY_INTO(const auto& uid, requireString(obj, "uid"))
-    TRY_INTO(const auto& version, parseCommonVersion(uid, obj))
+    Version::Ptr version = parseCommonVersion(requireString(obj, "uid"), obj);
 
-    TRY_INTO(const auto& data,
-             OneSixVersionFormat::versionFileFromJson(QJsonDocument(obj), QString("%1/%2.json").arg(version->uid(), version->version()),
-                                                      obj.contains("order")))
-    version->setData(data);
+    version->setData(OneSixVersionFormat::versionFileFromJson(
+        QJsonDocument(obj), QString("%1/%2.json").arg(version->uid(), version->version()), obj.contains("order")));
     return version;
 }
 
 // Version list / package
-Result<Meta::VersionList::Ptr> parseVersionListInternal(const QJsonObject& obj)
+static VersionList::Ptr parseVersionListInternal(const QJsonObject& obj)
 {
-    TRY_INTO(const auto& uid, requireString(obj, "uid"))
-    TRY_INTO(const auto& versionsRaw, requireIsArrayOf<QJsonObject>(obj, "versions"))
+    const QString uid = requireString(obj, "uid");
 
-    QList<Meta::Version::Ptr> versions;
+    const QList<QJsonObject> versionsRaw = requireIsArrayOf<QJsonObject>(obj, "versions");
+    QList<Version::Ptr> versions;
     versions.reserve(versionsRaw.size());
-    for (const auto& v : versionsRaw) {
-        TRY_INTO(const auto& version, parseCommonVersion(uid, v))
-
+    std::transform(versionsRaw.begin(), versionsRaw.end(), std::back_inserter(versions), [uid](const QJsonObject& vObj) {
+        auto version = parseCommonVersion(uid, vObj);
         version->setProvidesRecommendations();
-        versions.push_back(version);
-    }
+        return version;
+    });
 
-    auto list = std::make_shared<Meta::VersionList>(uid);
+    VersionList::Ptr list = std::make_shared<VersionList>(uid);
     list->setName(obj["name"].toString());
     list->setVersions(versions);
     return list;
 }
 
-}  // namespace
-
-namespace Meta {
-
-Result<int> parseFormatVersion(const QJsonObject& obj, bool required)
+MetadataVersion parseFormatVersion(const QJsonObject& obj, bool required)
 {
     if (!obj.contains("formatVersion")) {
         if (required) {
-            return std::unexpected("format version is missing");
+            return MetadataVersion::Invalid;
         }
-        return 1;
+        return MetadataVersion::InitialRelease;
     }
     if (!obj.value("formatVersion").isDouble()) {
-        return std::unexpected("format version is not a number");
+        return MetadataVersion::Invalid;
     }
     switch (obj.value("formatVersion").toInt()) {
         case 0:
         case 1:
-            return 1;
+            return MetadataVersion::InitialRelease;
         default:
-            return std::unexpected("format version is not supported");
+            return MetadataVersion::Invalid;
     }
 }
 
-void serializeFormatVersion(QJsonObject& obj, int version)
+void serializeFormatVersion(QJsonObject& obj, Meta::MetadataVersion version)
 {
-    obj.insert("formatVersion", version);
+    if (version == MetadataVersion::Invalid) {
+        return;
+    }
+    obj.insert("formatVersion", int(version));
 }
 
-Result<> parseIndex(const QJsonObject& obj, Index* ptr)
+void parseIndex(const QJsonObject& obj, Index* ptr)
 {
-    TRY(parseFormatVersion(obj))
-    TRY_INTO(const auto& index, parseIndexInternal(obj))
-    ptr->merge(index);
-    return {};
+    const MetadataVersion version = parseFormatVersion(obj);
+    switch (version) {
+        case MetadataVersion::InitialRelease:
+            ptr->merge(parseIndexInternal(obj));
+            break;
+        case MetadataVersion::Invalid:
+            throw ParseException(QObject::tr("Unknown format version!"));
+    }
 }
 
-Result<> parseVersionList(const QJsonObject& obj, VersionList* ptr)
+void parseVersionList(const QJsonObject& obj, VersionList* ptr)
 {
-    TRY(parseFormatVersion(obj))
-    TRY_INTO(const auto& list, parseVersionListInternal(obj))
-    ptr->merge(list);
-    return {};
+    const MetadataVersion version = parseFormatVersion(obj);
+    switch (version) {
+        case MetadataVersion::InitialRelease:
+            ptr->merge(parseVersionListInternal(obj));
+            break;
+        case MetadataVersion::Invalid:
+            throw ParseException(QObject::tr("Unknown format version!"));
+    }
 }
 
-Result<> parseVersion(const QJsonObject& obj, Version* ptr)
+void parseVersion(const QJsonObject& obj, Version* ptr)
 {
-    TRY(parseFormatVersion(obj))
-    TRY_INTO(const auto& ver, parseVersionInternal(obj))
-    ptr->merge(ver);
-    return {};
+    const MetadataVersion version = parseFormatVersion(obj);
+    switch (version) {
+        case MetadataVersion::InitialRelease:
+            ptr->merge(parseVersionInternal(obj));
+            break;
+        case MetadataVersion::Invalid:
+            throw ParseException(QObject::tr("Unknown format version!"));
+    }
 }
 
 /*
@@ -163,19 +163,20 @@ Result<> parseVersion(const QJsonObject& obj, Version* ptr)
 {"uid":"foo", "equals":"version"}
 ]
 */
-Result<> parseRequires(const QJsonObject& obj, RequireSet* ptr, const char* keyName)
+void parseRequires(const QJsonObject& obj, RequireSet* ptr, const char* keyName)
 {
     if (obj.contains(keyName)) {
-        TRY_INTO(const auto& reqArray, requireArray(obj, keyName))
-        for (const auto iter : reqArray) {
-            TRY_INTO(const auto& reqObject, requireObject(iter))
-            TRY_INTO(const auto& uid, requireString(reqObject, "uid"))
+        auto reqArray = requireArray(obj, keyName);
+        auto iter = reqArray.begin();
+        while (iter != reqArray.end()) {
+            auto reqObject = requireObject(*iter);
+            auto uid = requireString(reqObject, "uid");
             auto equals = reqObject["equals"].toString();
             auto suggests = reqObject["suggests"].toString();
-            ptr->insert({ .uid = uid, .equalsVersion = equals, .suggests = suggests });
+            ptr->insert({ uid, equals, suggests });
+            iter++;
         }
     }
-    return {};
 }
 void serializeRequires(QJsonObject& obj, RequireSet* ptr, const char* keyName)
 {
@@ -183,7 +184,7 @@ void serializeRequires(QJsonObject& obj, RequireSet* ptr, const char* keyName)
         return;
     }
     QJsonArray arrOut;
-    for (const auto& iter : *ptr) {
+    for (auto& iter : *ptr) {
         QJsonObject reqOut;
         reqOut.insert("uid", iter.uid);
         if (!iter.equalsVersion.isEmpty()) {

@@ -35,7 +35,9 @@ class Version;
  * */
 
 class DataPack : public Resource {
+    Q_OBJECT
    public:
+    DataPack(QObject* parent = nullptr) : Resource(parent) {}
     DataPack(QFileInfo file_info) : Resource(file_info) {}
 
     /** Gets the numerical ID of the pack format. */
@@ -59,7 +61,7 @@ class DataPack : public Resource {
     bool valid() const override;
 
     [[nodiscard]] int compare(const Resource& other, SortType type) const override;
-    [[nodiscard]] bool applyFilter(const QRegularExpression& filter) const override;
+    [[nodiscard]] bool applyFilter(QRegularExpression filter) const override;
 
     QString packFormatStr() const;
 

@@ -61,6 +61,7 @@ FtbPage::FtbPage(NewInstanceDialog* dialog, QWidget* parent) : QWidget(parent), 
 
     m_ui->versionSelectionBox->view()->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_ui->versionSelectionBox->view()->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    m_ui->versionSelectionBox->view()->parentWidget()->setMaximumHeight(300);
 
     for (int i = 0; i < m_filterModel->getAvailableSortings().size(); i++) {
         m_ui->sortByBox->addItem(m_filterModel->getAvailableSortings().keys().at(i));
@@ -162,8 +163,7 @@ void FtbPage::onSelectionChanged(QModelIndex first, QModelIndex /*second*/)
         return;
     }
 
-    auto vdata = m_filterModel->data(first, Qt::UserRole);
-    m_selected = vdata.value<FTB::Modpack>();
+    m_selected = m_filterModel->data(first, Qt::UserRole).value<FTB::Modpack>();
 
     QString output = markdownToHTML(m_selected.description.toUtf8());
     m_ui->packDescription->setHtml(output);

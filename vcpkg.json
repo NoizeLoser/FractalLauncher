@@ -10,8 +10,7 @@
     },
     {
       "name": "pkgconf",
-      "host": true,
-      "platform": "windows"
+      "host": true
     },
 
     "cmark",

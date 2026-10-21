@@ -38,51 +38,32 @@
 
 #include "Application.h"
 #include "BuildConfig.h"
+#include "Json.h"
 #include "modplatform/ModIndex.h"
 #include "modplatform/modrinth/ModrinthAPI.h"
 #include "net/NetJob.h"
 #include "ui/widgets/ProjectItem.h"
 
-#include "net/ApiRequest.h"
+#include "net/ApiDownload.h"
 
 #include <QMessageBox>
 #include <memory>
-#include <utility>
 
-namespace {
-auto sortFromIndex(int index) -> QString
-{
-    switch (index) {
-        default:
-        case 0:
-            return "relevance";
-        case 1:
-            return "downloads";
-        case 2:
-            return "follows";
-        case 3:
-            return "newest";
-        case 4:
-            return "updated";
-    }
-}
-}  // namespace
 namespace Modrinth {
 
 ModpackListModel::ModpackListModel(ModrinthPage* parent) : QAbstractListModel(parent), m_parent(parent) {}
 
-auto ModpackListModel::debugName() -> QString
+auto ModpackListModel::debugName() const -> QString
 {
-    return ModrinthPage::debugName();
+    return m_parent->debugName();
 }
 
 /******** Make data requests ********/
 
 void ModpackListModel::fetchMore(const QModelIndex& parent)
 {
-    if (parent.isValid()) {
+    if (parent.isValid())
         return;
-    }
     if (m_nextSearchOffset == 0) {
         qWarning() << "fetchMore with 0 offset is wrong...";
         return;
@@ -109,12 +90,11 @@ auto ModpackListModel::data(const QModelIndex& index, int role) const -> QVarian
             return pack->description;
         }
         case Qt::DecorationRole: {
-            if (m_logoMap.contains(pack->logoName)) {
+            if (m_logoMap.contains(pack->logoName))
                 return m_logoMap.value(pack->logoName);
-            }
 
             QIcon icon = QIcon::fromTheme("screenshot-placeholder");
-            const_cast<ModpackListModel*>(this)->requestLogo(pack->logoName, pack->logoUrl);
+            ((ModpackListModel*)this)->requestLogo(pack->logoName, pack->logoUrl);
             return icon;
         }
         case Qt::UserRole: {
@@ -141,9 +121,8 @@ auto ModpackListModel::data(const QModelIndex& index, int role) const -> QVarian
 bool ModpackListModel::setData(const QModelIndex& index, const QVariant& value, [[maybe_unused]] int role)
 {
     int pos = index.row();
-    if (pos >= m_modpacks.size() || pos < 0 || !index.isValid()) {
+    if (pos >= m_modpacks.size() || pos < 0 || !index.isValid())
         return false;
-    }
 
     m_modpacks[pos] = value.value<ModPlatform::IndexedPack::Ptr>();
 
@@ -152,76 +131,51 @@ bool ModpackListModel::setData(const QModelIndex& index, const QVariant& value, 
 
 void ModpackListModel::performPaginatedSearch()
 {
-    if (hasActiveSearchJob()) {
+    if (hasActiveSearchJob())
         return;
-    }
+    static const ModrinthAPI api;
 
     // Modrinth ids are not limited to numbers and can be any length
     if (m_searchState != ResetRequested && m_currentSearchTerm.startsWith("#")) {
         auto projectId = m_currentSearchTerm.mid(1);
         if (!projectId.isEmpty()) {
-            auto [job, response] = ModrinthAPI::get().getProjectTask(projectId, true, false);
+            ResourceAPI::Callback<ModPlatform::IndexedPack::Ptr> callbacks;
 
-            connect(job.get(), &NetJob::succeeded, this, [response, this] {
-                auto pack = std::make_shared<ModPlatform::IndexedPack>();
-                *pack = *response;
-                searchRequestForOneSucceeded(pack);
-            });
-            auto weak = job.toWeakRef();
-            connect(job.get(), &NetJob::failed, this, [weak, this](const QString& reason) {
-                int networkErrorCode = -1;
-                if (auto job = weak.lock()) {
-                    if (auto* failedAction = job->getFailedActions().at(0); failedAction) {
-                        networkErrorCode = failedAction->replyStatusCode();
-                    }
-                }
-                if (networkErrorCode == 404) {
+            callbacks.on_fail = [this](QString reason, int network_error_code) {
+                if (network_error_code == 404) {
                     m_searchState = ResetRequested;
                 }
-                searchRequestFailed(reason, networkErrorCode);
-            });
-            connect(job.get(), &NetJob::aborted, this, [this] {
+                searchRequestFailed(reason, network_error_code);
+            };
+            callbacks.on_succeed = [this](auto& pack) { searchRequestForOneSucceeded(pack); };
+            callbacks.on_abort = [this] {
                 qCritical() << "Search task aborted by an unknown reason!";
                 searchRequestFailed("Aborted", 0);
-            });
-
-            m_jobPtr = job;
-            m_jobPtr->start();
-
+            };
+            auto project = std::make_shared<ModPlatform::IndexedPack>();
+            project->addonId = projectId;
+            if (auto job = api.getProjectInfo({ project }, std::move(callbacks), false); job) {
+                m_jobPtr = job;
+                m_jobPtr->start();
+            }
             return;
         }
     }  // TODO: Move to standalone API
     ResourceAPI::SortingMethod sort{};
     sort.name = m_currentSort;
 
-    auto [netJob, response] = ModrinthAPI::get().searchProjectsTask({
-        .type = ModPlatform::ResourceType::Modpack,
-        .offset = m_nextSearchOffset,
-        .search = m_currentSearchTerm,
-        .sorting = sort,
-        .loaders = m_filter->loaders,
-        .versions = m_filter->versions,
-        .side = ModPlatform::SideType::NoSide,
-        .categoryIds = m_filter->categoryIds,
-        .openSource = m_filter->openSource,
-        .excludeDisclosureTypes = m_filter->excludeDisclosureTypes,
-    });
+    ResourceAPI::Callback<QList<ModPlatform::IndexedPack::Ptr>> callbacks{};
 
-    connect(netJob.get(), &NetJob::succeeded, this, [response, this] { searchRequestFinished(*response); });
-    auto weak = netJob.toWeakRef();
-    connect(netJob.get(), &NetJob::failed, this, [weak, this](const QString& reason) {
-        int networkErrorCode = -1;
-        if (auto job = weak.lock()) {
-            if (auto* failedAction = job->getFailedActions().at(0); failedAction) {
-                networkErrorCode = failedAction->replyStatusCode();
-            }
-        }
-        searchRequestFailed(reason, networkErrorCode);
-    });
-    connect(netJob.get(), &NetJob::aborted, this, [this] {
+    callbacks.on_succeed = [this](auto& doc) { searchRequestFinished(doc); };
+    callbacks.on_fail = [this](QString reason, int network_error_code) { searchRequestFailed(reason, network_error_code); };
+    callbacks.on_abort = [this] {
         qCritical() << "Search task aborted by an unknown reason!";
         searchRequestFailed("Aborted", 0);
-    });
+    };
+
+    auto netJob = api.searchProjects({ ModPlatform::ResourceType::Modpack, m_nextSearchOffset, m_currentSearchTerm, sort, m_filter->loaders,
+                                       m_filter->versions, ModPlatform::Side::NoSide, m_filter->categoryIds, m_filter->openSource },
+                                     std::move(callbacks));
 
     m_jobPtr = netJob;
     m_jobPtr->start();
@@ -244,47 +198,63 @@ void ModpackListModel::refresh()
     performPaginatedSearch();
 }
 
+static auto sortFromIndex(int index) -> QString
+{
+    switch (index) {
+        default:
+        case 0:
+            return "relevance";
+        case 1:
+            return "downloads";
+        case 2:
+            return "follows";
+        case 3:
+            return "newest";
+        case 4:
+            return "updated";
+    }
+}
+
 void ModpackListModel::searchWithTerm(const QString& term,
                                       const int sort,
                                       std::shared_ptr<ModFilterWidget::Filter> filter,
                                       bool filterChanged)
 {
-    if (sort > 5 || sort < 0) {
+    if (sort > 5 || sort < 0)
         return;
-    }
 
-    auto sortStr = sortFromIndex(sort);
+    auto sort_str = sortFromIndex(sort);
 
-    if (m_currentSearchTerm == term && m_currentSearchTerm.isNull() == term.isNull() && m_currentSort == sortStr && !filterChanged) {
+    if (m_currentSearchTerm == term && m_currentSearchTerm.isNull() == term.isNull() && m_currentSort == sort_str && !filterChanged) {
         return;
     }
 
     m_currentSearchTerm = term;
-    m_currentSort = sortStr;
-    m_filter = std::move(filter);
+    m_currentSort = sort_str;
+    m_filter = filter;
 
     refresh();
 }
 
-void ModpackListModel::getLogo(const QString& logo, const QString& logoUrl, const LogoCallback& callback)
+void ModpackListModel::getLogo(const QString& logo, const QString& logoUrl, LogoCallback callback)
 {
     if (m_logoMap.contains(logo)) {
-        callback(APPLICATION->metacache()->resolveEntry(ModrinthPage::metaEntryBase(), QString("logos/%1").arg(logo))->getFullPath());
+        callback(APPLICATION->metacache()->resolveEntry(m_parent->metaEntryBase(), QString("logos/%1").arg(logo))->getFullPath());
     } else {
         requestLogo(logo, logoUrl);
     }
 }
 
-void ModpackListModel::requestLogo(const QString& logo, const QString& url)
+void ModpackListModel::requestLogo(QString logo, QString url)
 {
     if (m_loadingLogos.contains(logo) || m_failedLogos.contains(logo) || url.isEmpty()) {
         return;
     }
 
-    MetaEntryPtr entry = APPLICATION->metacache()->resolveEntry(ModrinthPage::metaEntryBase(), QString("logos/%1").arg(logo));
-    auto* job = new NetJob(QString("%1 Icon Download %2").arg(ModrinthPage::debugName()).arg(logo), APPLICATION->network());
+    MetaEntryPtr entry = APPLICATION->metacache()->resolveEntry(m_parent->metaEntryBase(), QString("logos/%1").arg(logo));
+    auto job = new NetJob(QString("%1 Icon Download %2").arg(m_parent->debugName()).arg(logo), APPLICATION->network());
     job->setAskRetry(false);
-    job->addNetAction(Net::ApiRequest::makeCached(QUrl(url), entry));
+    job->addNetAction(Net::ApiDownload::makeCached(QUrl(url), entry));
 
     auto fullPath = entry->getFullPath();
     connect(job, &NetJob::succeeded, this, [this, logo, fullPath, job] {
@@ -306,7 +276,7 @@ void ModpackListModel::requestLogo(const QString& logo, const QString& url)
 
 /******** Request callbacks ********/
 
-void ModpackListModel::logoLoaded(const QString& logo, const QIcon& out)
+void ModpackListModel::logoLoaded(QString logo, QIcon out)
 {
     m_loadingLogos.removeAll(logo);
     m_logoMap.insert(logo, out);
@@ -317,34 +287,29 @@ void ModpackListModel::logoLoaded(const QString& logo, const QIcon& out)
     }
 }
 
-void ModpackListModel::logoFailed(const QString& logo)
+void ModpackListModel::logoFailed(QString logo)
 {
     m_failedLogos.append(logo);
     m_loadingLogos.removeAll(logo);
 }
 
-void ModpackListModel::searchRequestFinished(const QList<ModPlatform::IndexedPack>& newList)
+void ModpackListModel::searchRequestFinished(QList<ModPlatform::IndexedPack::Ptr>& newList)
 {
     m_jobPtr.reset();
 
-    if (newList.size() < m_modpacksPerPage) {
+    if (newList.size() < m_modpacks_per_page) {
         m_searchState = Finished;
     } else {
-        m_nextSearchOffset += m_modpacksPerPage;
+        m_nextSearchOffset += m_modpacks_per_page;
         m_searchState = CanPossiblyFetchMore;
     }
 
     // When you have a Qt build with assertions turned on, proceeding here will abort the application
-    if (newList.size() == 0) {
+    if (newList.size() == 0)
         return;
-    }
 
-    beginInsertRows(QModelIndex(), static_cast<int>(m_modpacks.size()), static_cast<int>(m_modpacks.size() + newList.size() - 1));
-    for (const auto& p : newList) {
-        auto pack = std::make_shared<ModPlatform::IndexedPack>();
-        *pack = p;
-        m_modpacks.append(pack);
-    }
+    beginInsertRows(QModelIndex(), m_modpacks.size(), m_modpacks.size() + newList.size() - 1);
+    m_modpacks.append(newList);
     endInsertRows();
 }
 
@@ -352,17 +317,17 @@ void ModpackListModel::searchRequestForOneSucceeded(ModPlatform::IndexedPack::Pt
 {
     m_jobPtr.reset();
 
-    beginInsertRows(QModelIndex(), static_cast<int>(m_modpacks.size()), static_cast<int>(m_modpacks.size() + 1));
+    beginInsertRows(QModelIndex(), m_modpacks.size(), m_modpacks.size() + 1);
     m_modpacks.append(pack);
     endInsertRows();
 }
 
-void ModpackListModel::searchRequestFailed(const QString& /*reason*/, int networkErrorCode)
+void ModpackListModel::searchRequestFailed(QString reason, int network_error_code)
 {
-    if (networkErrorCode == -1) {
+    if (network_error_code == -1) {
         // Unknown error in network stack
         QMessageBox::critical(nullptr, tr("Error"), tr("A network error occurred. Could not load modpacks."));
-    } else if (networkErrorCode == 409) {
+    } else if (network_error_code == 409) {
         // 409 Gone, notify user to update
         QMessageBox::critical(nullptr, tr("Error"),
                               //: %1 refers to the launcher itself

@@ -26,6 +26,7 @@
 #include <compare>
 #include <sstream>
 #include <string>
+#include <utility>
 
 #include "FileSystem.h"
 #include "StringUtils.h"
@@ -104,45 +105,45 @@ bool sortMCVersions(const QString& a, const QString& b)
 }
 
 }  // namespace
-auto V1::createModFormat([[maybe_unused]] const QDir& indexDir, ModPlatform::IndexedPack& modPack, ModPlatform::IndexedVersion& modVersion)
-    -> Mod
+auto V1::createModFormat([[maybe_unused]] const QDir& index_dir,
+                         ModPlatform::IndexedPack& mod_pack,
+                         ModPlatform::IndexedVersion& mod_version) -> Mod
 {
     Mod mod;
 
-    mod.slug = modPack.slug;
-    mod.name = modPack.name;
-    mod.filename = modVersion.fileName;
+    mod.slug = mod_pack.slug;
+    mod.name = mod_pack.name;
+    mod.filename = mod_version.fileName;
 
-    if (modPack.provider == ModPlatform::ResourceProvider::FLAME) {
+    if (mod_pack.provider == ModPlatform::ResourceProvider::FLAME) {
         mod.mode = "metadata:curseforge";
     } else {
         mod.mode = "url";
-        mod.url = modVersion.downloadUrl;
+        mod.url = mod_version.downloadUrl;
     }
 
-    mod.hashFormat = modVersion.hashType;
-    mod.hash = modVersion.hash;
+    mod.hash_format = mod_version.hash_type;
+    mod.hash = mod_version.hash;
 
-    mod.provider = modPack.provider;
-    mod.fileId = modVersion.fileId;
-    mod.projectId = modPack.addonId;
-    mod.side = modVersion.side == ModPlatform::SideType::NoSide ? modPack.side : modVersion.side;
-    mod.loaders = modVersion.loaders;
-    mod.mcVersions = modVersion.mcVersion;
+    mod.provider = mod_pack.provider;
+    mod.file_id = mod_version.fileId;
+    mod.project_id = mod_pack.addonId;
+    mod.side = mod_version.side == ModPlatform::Side::NoSide ? mod_pack.side : mod_version.side;
+    mod.loaders = mod_version.loaders;
+    mod.mcVersions = mod_version.mcVersion;
     mod.mcVersions.removeDuplicates();
     std::ranges::sort(mod.mcVersions, sortMCVersions);
-    mod.releaseType = modVersion.versionType;
+    mod.releaseType = mod_version.version_type;
 
-    mod.versionNumber = modVersion.versionNumber;
-    if (mod.versionNumber.isNull()) {  // on CurseForge, there is only a version name - not a version number
-        mod.versionNumber = modVersion.version;
-    }
+    mod.version_number = mod_version.version_number;
+    if (mod.version_number.isNull())  // on CurseForge, there is only a version name - not a version number
+        mod.version_number = mod_version.version;
 
-    mod.dependencies = modVersion.dependencies;
+    mod.dependencies = mod_version.dependencies;
     return mod;
 }
 
-void V1::updateModIndex(const QDir& indexDir, Mod& mod)
+void V1::updateModIndex(const QDir& index_dir, Mod& mod)
 {
     if (!mod.isValid()) {
         qCritical() << QString("Tried to update metadata of an invalid mod!");
@@ -151,44 +152,43 @@ void V1::updateModIndex(const QDir& indexDir, Mod& mod)
 
     // Ensure the corresponding mod's info exists, and create it if not
 
-    auto normalizedFname = indexFileName(mod.slug);
-    auto realFname = getRealIndexName(indexDir, normalizedFname);
+    auto normalized_fname = indexFileName(mod.slug);
+    auto real_fname = getRealIndexName(index_dir, normalized_fname);
 
-    QFile indexFile(indexDir.absoluteFilePath(realFname));
+    QFile index_file(index_dir.absoluteFilePath(real_fname));
 
-    if (realFname != normalizedFname) {
-        indexFile.rename(normalizedFname);
-    }
+    if (real_fname != normalized_fname)
+        index_file.rename(normalized_fname);
 
     // There's already data on there!
     // TODO: We should do more stuff here, as the user is likely trying to
     // override a file. In this case, check versions and ask the user what
     // they want to do!
-    if (indexFile.exists()) {
-        indexFile.remove();
+    if (index_file.exists()) {
+        index_file.remove();
     } else {
-        FS::ensureFilePathExists(indexFile.fileName());
+        FS::ensureFilePathExists(index_file.fileName());
     }
 
     toml::table update;
     switch (mod.provider) {
         case (ModPlatform::ResourceProvider::FLAME):
-            if (mod.fileId.toInt() == 0 || mod.projectId.toInt() == 0) {
-                qCritical() << QString("Did not write file %1 because missing information!").arg(normalizedFname);
+            if (mod.file_id.toInt() == 0 || mod.project_id.toInt() == 0) {
+                qCritical() << QString("Did not write file %1 because missing information!").arg(normalized_fname);
                 return;
             }
             update = toml::table{
-                { "file-id", mod.fileId.toInt() },
-                { "project-id", mod.projectId.toInt() },
+                { "file-id", mod.file_id.toInt() },
+                { "project-id", mod.project_id.toInt() },
             };
             break;
         case (ModPlatform::ResourceProvider::MODRINTH):
-            if (mod.modId().toString().isEmpty() || mod.version().toString().isEmpty()) {
-                qCritical() << QString("Did not write file %1 because missing information!").arg(normalizedFname);
+            if (mod.mod_id().toString().isEmpty() || mod.version().toString().isEmpty()) {
+                qCritical() << QString("Did not write file %1 because missing information!").arg(normalized_fname);
                 return;
             }
             update = toml::table{
-                { "mod-id", mod.modId().toString().toStdString() },
+                { "mod-id", mod.mod_id().toString().toStdString() },
                 { "version", mod.version().toString().toStdString() },
             };
             break;
@@ -199,18 +199,19 @@ void V1::updateModIndex(const QDir& indexDir, Mod& mod)
         loaders.push_back(getModLoaderAsString(loader).toStdString());
     }
     toml::array mcVersions;
-    for (const auto& version : mod.mcVersions) {
+    for (auto version : mod.mcVersions) {
         mcVersions.push_back(version.toStdString());
     }
 
-    if (!indexFile.open(QIODevice::ReadWrite)) {
-        qCritical() << "Could not open file" << normalizedFname << "error:" << indexFile.errorString();
+    if (!index_file.open(QIODevice::ReadWrite)) {
+        qCritical() << "Could not open file" << normalized_fname << "error:" << index_file.errorString();
         return;
     }
 
     toml::array deps;
-    for (const auto& dep : mod.dependencies) {
-        auto tbl = toml::table{ { "addonId", dep.addonId.toString().toStdString() }, { "type", dep.type.toString().toStdString() } };
+    for (auto dep : mod.dependencies) {
+        auto tbl = toml::table{ { "addonId", dep.addonId.toString().toStdString() },
+                                { "type", ModPlatform::DependencyTypeUtils::toString(dep.type).toStdString() } };
         if (!dep.version.isEmpty()) {
             tbl.emplace("version", dep.version.toStdString());
         }
@@ -218,80 +219,74 @@ void V1::updateModIndex(const QDir& indexDir, Mod& mod)
     }
 
     // Put TOML data into the file
-    QTextStream inStream(&indexFile);
+    QTextStream in_stream(&index_file);
     {
         auto tbl = toml::table{ { "name", mod.name.toStdString() },
                                 { "filename", mod.filename.toStdString() },
-                                { "side", mod.side.toString().toStdString() },
+                                { "side", ModPlatform::SideUtils::toString(mod.side).toStdString() },
                                 { "x-prismlauncher-loaders", loaders },
                                 { "x-prismlauncher-mc-versions", mcVersions },
                                 { "x-prismlauncher-release-type", mod.releaseType.toString().toStdString() },
-                                { "x-prismlauncher-version-number", mod.versionNumber.toStdString() },
+                                { "x-prismlauncher-version-number", mod.version_number.toStdString() },
                                 { "x-prismlauncher-dependencies", deps },
-                                { "x-prismlauncher-lock-update", mod.lockUpdate },
                                 { "download",
                                   toml::table{
                                       { "mode", mod.mode.toStdString() },
                                       { "url", mod.url.toString().toStdString() },
-                                      { "hash-format", mod.hashFormat.toStdString() },
+                                      { "hash-format", mod.hash_format.toStdString() },
                                       { "hash", mod.hash.toStdString() },
                                   } },
                                 { "update", toml::table{ { ModPlatform::ProviderCapabilities::name(mod.provider), update } } } };
         std::stringstream ss;
         ss << tbl;
-        inStream << QString::fromStdString(ss.str());
+        in_stream << QString::fromStdString(ss.str());
     }
 
-    indexFile.flush();
-    indexFile.close();
+    index_file.flush();
+    index_file.close();
 }
 
-void V1::deleteModIndex(const QDir& indexDir, QString& modSlug)
+void V1::deleteModIndex(const QDir& index_dir, QString& mod_slug)
 {
-    auto normalizedFname = indexFileName(modSlug);
-    auto realFname = getRealIndexName(indexDir, normalizedFname);
-    if (realFname.isEmpty()) {
+    auto normalized_fname = indexFileName(mod_slug);
+    auto real_fname = getRealIndexName(index_dir, normalized_fname);
+    if (real_fname.isEmpty())
+        return;
+
+    QFile index_file(index_dir.absoluteFilePath(real_fname));
+
+    if (!index_file.exists()) {
+        qWarning() << QString("Tried to delete non-existent mod metadata for %1!").arg(mod_slug);
         return;
     }
 
-    QFile indexFile(indexDir.absoluteFilePath(realFname));
-
-    if (!indexFile.exists()) {
-        qWarning() << QString("Tried to delete non-existent mod metadata for %1!").arg(modSlug);
-        return;
-    }
-
-    if (!indexFile.remove()) {
-        qWarning() << QString("Failed to remove metadata for mod %1!").arg(modSlug);
+    if (!index_file.remove()) {
+        qWarning() << QString("Failed to remove metadata for mod %1!").arg(mod_slug);
     }
 }
 
-auto V1::getIndexForMod(const QDir& indexDir, const QString& slug) -> Mod
+auto V1::getIndexForMod(const QDir& index_dir, QString slug) -> Mod
 {
     Mod mod;
 
-    auto normalizedFname = indexFileName(slug);
-    auto realFname = getRealIndexName(indexDir, normalizedFname, true);
-    if (realFname.isEmpty()) {
+    auto normalized_fname = indexFileName(slug);
+    auto real_fname = getRealIndexName(index_dir, normalized_fname, true);
+    if (real_fname.isEmpty())
         return {};
-    }
 
     toml::table table;
 #if TOML_EXCEPTIONS
-    // Catch std::exception instead of toml::parse_error to work around
-    // the latter not being caught here when compiled with libc++.
-    // See https://github.com/PrismLauncher/PrismLauncher/issues/6047.
     try {
-        table = toml::parse_file(StringUtils::toStdString(indexDir.absoluteFilePath(realFname)));
-    } catch (const std::exception& err) {
-        qWarning() << QString("Could not open file %1!").arg(normalizedFname);
+        table = toml::parse_file(StringUtils::toStdString(index_dir.absoluteFilePath(real_fname)));
+    } catch (const toml::parse_error& err) {
+        qWarning() << QString("Could not open file %1!").arg(normalized_fname);
         qWarning() << "Reason:" << QString(err.what());
         return {};
     }
 #else
-    toml::parse_result result = toml::parse_file(StringUtils::toStdString(indexDir.absoluteFilePath(realFname)));
+    toml::parse_result result = toml::parse_file(StringUtils::toStdString(index_dir.absoluteFilePath(real_fname)));
     if (!result) {
-        qWarning() << QString("Could not open file %1!").arg(normalizedFname);
+        qWarning() << QString("Could not open file %1!").arg(normalized_fname);
         qWarning() << "Reason:" << result.error().description();
         return {};
     }
@@ -305,9 +300,8 @@ auto V1::getIndexForMod(const QDir& indexDir, const QString& slug) -> Mod
     {  // Basic info
         mod.name = stringEntry(table, "name");
         mod.filename = stringEntry(table, "filename");
-        mod.side = ModPlatform::SideType::fromString(stringEntry(table, "side"));
+        mod.side = ModPlatform::SideUtils::fromString(stringEntry(table, "side"));
         mod.releaseType = ModPlatform::IndexedVersionType::fromString(table["x-prismlauncher-release-type"].value_or(""));
-        mod.lockUpdate = table["x-prismlauncher-lock-update"].value_or(false);
         if (auto loaders = table["x-prismlauncher-loaders"]; loaders && loaders.is_array()) {
             for (auto&& loader : *loaders.as_array()) {
                 if (loader.is_string()) {
@@ -328,59 +322,56 @@ auto V1::getIndexForMod(const QDir& indexDir, const QString& slug) -> Mod
             std::ranges::sort(mod.mcVersions, sortMCVersions);
         }
     }
-    mod.versionNumber = table["x-prismlauncher-version-number"].value_or("");
+    mod.version_number = table["x-prismlauncher-version-number"].value_or("");
 
     {  // [download] info
-        auto* downloadTable = table["download"].as_table();
-        if (!downloadTable) {
+        auto download_table = table["download"].as_table();
+        if (!download_table) {
             qCritical() << QString("No [download] section found on mod metadata!");
             return {};
         }
 
-        mod.mode = stringEntry(*downloadTable, "mode");
-        mod.url = stringEntry(*downloadTable, "url");
-        mod.hashFormat = stringEntry(*downloadTable, "hash-format");
-        mod.hash = stringEntry(*downloadTable, "hash");
+        mod.mode = stringEntry(*download_table, "mode");
+        mod.url = stringEntry(*download_table, "url");
+        mod.hash_format = stringEntry(*download_table, "hash-format");
+        mod.hash = stringEntry(*download_table, "hash");
     }
 
     {  // [update] info
         using Provider = ModPlatform::ResourceProvider;
 
-        auto updateTable = table["update"];
-        if (!updateTable || !updateTable.is_table()) {
+        auto update_table = table["update"];
+        if (!update_table || !update_table.is_table()) {
             qCritical() << QString("No [update] section found on mod metadata!");
             return {};
         }
 
-        auto* modProviderTable = updateTable[ModPlatform::ProviderCapabilities::name(Provider::FLAME)].as_table();
-        if (modProviderTable != nullptr) {
+        toml::table* mod_provider_table = nullptr;
+        if ((mod_provider_table = update_table[ModPlatform::ProviderCapabilities::name(Provider::FLAME)].as_table())) {
             mod.provider = Provider::FLAME;
-            mod.fileId = intEntry(*modProviderTable, "file-id");
-            mod.projectId = intEntry(*modProviderTable, "project-id");
+            mod.file_id = intEntry(*mod_provider_table, "file-id");
+            mod.project_id = intEntry(*mod_provider_table, "project-id");
+        } else if ((mod_provider_table = update_table[ModPlatform::ProviderCapabilities::name(Provider::MODRINTH)].as_table())) {
+            mod.provider = Provider::MODRINTH;
+            mod.mod_id() = stringEntry(*mod_provider_table, "mod-id");
+            mod.version() = stringEntry(*mod_provider_table, "version");
         } else {
-            modProviderTable = updateTable[ModPlatform::ProviderCapabilities::name(Provider::MODRINTH)].as_table();
-            if (modProviderTable != nullptr) {
-                mod.provider = Provider::MODRINTH;
-                mod.modId() = stringEntry(*modProviderTable, "mod-id");
-                mod.version() = stringEntry(*modProviderTable, "version");
-            } else {
-                qCritical() << QString("No mod provider on mod metadata!");
-                return {};
-            }
+            qCritical() << QString("No mod provider on mod metadata!");
+            return {};
         }
     }
     {  // dependencies
-        auto* deps = table["x-prismlauncher-dependencies"].as_array();
+        auto deps = table["x-prismlauncher-dependencies"].as_array();
         if (deps) {
             for (auto&& depNode : *deps) {
-                auto* dep = depNode.as_table();
+                auto dep = depNode.as_table();
                 if (dep) {
                     ModPlatform::Dependency d;
                     d.addonId = stringEntry(*dep, "addonId");
                     if (dep->contains("version")) {
                         d.version = stringEntry(*dep, "version");
                     }
-                    d.type = ModPlatform::DependencyType::fromString(stringEntry(*dep, "type"));
+                    d.type = ModPlatform::DependencyTypeUtils::fromString(stringEntry(*dep, "type"));
                     mod.dependencies << d;
                 }
             }
@@ -390,14 +381,13 @@ auto V1::getIndexForMod(const QDir& indexDir, const QString& slug) -> Mod
     return mod;
 }
 
-auto V1::getIndexForMod(const QDir& indexDir, QVariant& modId) -> Mod
+auto V1::getIndexForMod(const QDir& index_dir, QVariant& mod_id) -> Mod
 {
-    for (auto& fileName : indexDir.entryList(QDir::Filter::Files)) {
-        auto mod = getIndexForMod(indexDir, fileName);
+    for (auto& file_name : index_dir.entryList(QDir::Filter::Files)) {
+        auto mod = getIndexForMod(index_dir, file_name);
 
-        if (mod.modId() == modId) {
+        if (mod.mod_id() == mod_id)
             return mod;
-        }
     }
 
     return {};

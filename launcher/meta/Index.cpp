@@ -15,7 +15,6 @@
 
 #include "Index.h"
 
-#include "Application.h"
 #include "JsonFormat.h"
 #include "QObjectPtr.h"
 #include "VersionList.h"
@@ -35,7 +34,7 @@ Index::Index(const QList<VersionList::Ptr>& lists, QObject* parent) : QAbstractL
 QVariant Index::data(const QModelIndex& index, int role) const
 {
     if (index.parent().isValid() || index.row() < 0 || index.row() >= m_lists.size()) {
-        return {};
+        return QVariant();
     }
 
     VersionList::Ptr list = m_lists.at(index.row());
@@ -43,19 +42,17 @@ QVariant Index::data(const QModelIndex& index, int role) const
         case Qt::DisplayRole:
             if (index.column() == 0) {
                 return list->humanReadable();
+            } else {
+                break;
             }
-            break;
-
-        case Roles::UidRole:
+        case UidRole:
             return list->uid();
-        case Roles::NameRole:
+        case NameRole:
             return list->name();
-        case Roles::ListPtrRole:
+        case ListPtrRole:
             return QVariant::fromValue(list);
-        default:
-            break;
     }
-    return {};
+    return QVariant();
 }
 
 int Index::rowCount(const QModelIndex& parent) const
@@ -72,8 +69,9 @@ QVariant Index::headerData(int section, Qt::Orientation orientation, int role) c
 {
     if (orientation == Qt::Horizontal && role == Qt::DisplayRole && section == 0) {
         return tr("Name");
+    } else {
+        return QVariant();
     }
-    return {};
 }
 
 bool Index::hasUid(const QString& uid) const
@@ -86,7 +84,7 @@ VersionList::Ptr Index::get(const QString& uid)
     VersionList::Ptr out = m_uids.value(uid, nullptr);
     if (!out) {
         out = std::make_shared<VersionList>(uid);
-        m_uids.insert(uid, out);
+        m_uids[uid] = out;
         m_lists.append(out);
     }
     return out;
@@ -98,9 +96,9 @@ Version::Ptr Index::get(const QString& uid, const QString& version)
     return list->getVersion(version);
 }
 
-Result<> Index::parse(const QJsonObject& obj)
+void Index::parse(const QJsonObject& obj)
 {
-    return parseIndex(obj, this);
+    parseIndex(obj, this);
 }
 
 void Index::merge(const std::shared_ptr<Index>& other)
@@ -117,9 +115,8 @@ void Index::merge(const std::shared_ptr<Index>& other)
         endResetModel();
     } else {
         for (const VersionList::Ptr& list : lists) {
-            auto it = m_uids.find(list->uid());
-            if (it != m_uids.end()) {
-                it.value()->mergeFromIndex(list);
+            if (m_uids.contains(list->uid())) {
+                m_uids[list->uid()]->mergeFromIndex(list);
             } else {
                 beginInsertRows(QModelIndex(), m_lists.size(), m_lists.size());
                 connectVersionList(m_lists.size(), list);
@@ -138,7 +135,7 @@ void Index::connectVersionList(const int row, const VersionList::Ptr& list)
 
 Task::Ptr Index::loadVersion(const QString& uid, const QString& version, Net::Mode mode, bool force)
 {
-    if (mode == Net::Mode::Offline || !APPLICATION->settings()->get("MetaRefreshOnLaunch").toBool()) {
+    if (mode == Net::Mode::Offline) {
         return get(uid, version)->loadTask(mode);
     }
 

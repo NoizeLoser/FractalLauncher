@@ -72,7 +72,7 @@ class Component : public QObject, public ProblemProvider {
     bool isRevertible();
     bool isRemovable();
     bool isCustom();
-    bool isVersionChangeable() const;
+    bool isVersionChangeable(bool wait = true);
     bool isKnownModloader();
     QStringList knownConflictingComponents();
 

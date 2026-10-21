@@ -42,6 +42,8 @@
 #include "BaseInstance.h"
 #include "ui/pages/BasePage.h"
 
+#include "settings/Setting.h"
+
 namespace Ui {
 class ServersPage;
 }
@@ -54,7 +56,7 @@ class ServersPage : public QMainWindow, public BasePage {
     Q_OBJECT
 
    public:
-    explicit ServersPage(MinecraftInstance* inst, QWidget* parent = 0);
+    explicit ServersPage(BaseInstance* inst, QWidget* parent = 0);
     virtual ~ServersPage();
 
     void openedImpl() override;
@@ -75,7 +77,8 @@ class ServersPage : public QMainWindow, public BasePage {
     bool saveIsScheduled() const;
 
    private slots:
-    void selectionChanged();
+    void currentChanged(const QModelIndex& current, const QModelIndex& previous);
+    void rowsRemoved(const QModelIndex& parent, int first, int last);
 
     void on_actionAdd_triggered();
     void on_actionRemove_triggered();
@@ -97,5 +100,7 @@ class ServersPage : public QMainWindow, public BasePage {
     bool m_locked = true;
     Ui::ServersPage* ui = nullptr;
     ServersModel* m_model = nullptr;
-    MinecraftInstance* m_inst = nullptr;
+    BaseInstance* m_inst = nullptr;
+
+    std::shared_ptr<Setting> m_wide_bar_setting = nullptr;
 };

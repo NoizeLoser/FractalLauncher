@@ -19,7 +19,7 @@ using LogoCallback = std::function<void(QString)>;
 class FilterModel : public QSortFilterProxyModel {
     Q_OBJECT
    public:
-    FilterModel(QObject* parent = nullptr);
+    FilterModel(QObject* parent = Q_NULLPTR);
     enum Sorting { ByName, ByGameVersion };
     const QMap<QString, Sorting> getAvailableSortings();
     QString translateCurrentSorting();

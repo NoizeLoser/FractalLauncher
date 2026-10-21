@@ -20,7 +20,7 @@
 #include <BuildConfig.h>
 #include <Json.h>
 
-#include "net/ApiRequest.h"
+#include "net/ApiDownload.h"
 #include "ui/widgets/ProjectItem.h"
 
 namespace Atl {
@@ -99,7 +99,7 @@ void ListModel::request()
 
     auto netJob = makeShared<NetJob>("Atl::Request", APPLICATION->network());
     auto url = QString(BuildConfig.ATL_DOWNLOAD_SERVER_URL + "launcher/json/packsnew.json");
-    auto [action, response] = Net::ApiRequest::makeByteArray(QUrl(url));
+    auto [action, response] = Net::ApiDownload::makeByteArray(QUrl(url));
     netJob->addNetAction(action);
     jobPtr = netJob;
     jobPtr->start();
@@ -114,40 +114,39 @@ void ListModel::requestFinished(QByteArray* responsePtr)
     QByteArray response = std::move(*responsePtr);
     jobPtr.reset();
 
-    auto doc = Json::requireDocument(response);
-    if (!doc) {
-        qWarning() << "Error while parsing JSON response from ATL:" << doc.error();
+    QJsonParseError parse_error;
+    QJsonDocument doc = QJsonDocument::fromJson(response, &parse_error);
+    if (parse_error.error != QJsonParseError::NoError) {
+        qWarning() << "Error while parsing JSON response from ATL at" << parse_error.offset << "reason:" << parse_error.errorString();
         qWarning() << response;
         return;
     }
 
     QList<ATLauncher::IndexedPack> newList;
 
-    auto packs = doc->array();
+    auto packs = doc.array();
     for (auto packRaw : packs) {
         auto packObj = packRaw.toObject();
 
         ATLauncher::IndexedPack pack;
 
-        auto packRes = ATLauncher::loadIndexedPack(pack, packObj);
-        if (!packRes) {
+        try {
+            ATLauncher::loadIndexedPack(pack, packObj);
+        } catch (const JSONValidationError& e) {
             qDebug() << QString::fromUtf8(response);
-            qWarning() << "Error while reading pack manifest from ATLauncher:" << packRes.error();
+            qWarning() << "Error while reading pack manifest from ATLauncher:" << e.cause();
             return;
         }
 
         // ignore packs without a published version
-        if (pack.versions.length() == 0) {
+        if (pack.versions.length() == 0)
             continue;
-        }
         // only display public packs (for now)
-        if (pack.type != ATLauncher::PackType::Public) {
+        if (pack.type != ATLauncher::PackType::Public)
             continue;
-        }
         // ignore "system" packs (Vanilla, Vanilla with Forge, etc)
-        if (pack.system) {
+        if (pack.system)
             continue;
-        }
 
         newList.append(pack);
     }
@@ -198,7 +197,7 @@ void ListModel::requestLogo(QString file, QString url)
     MetaEntryPtr entry = APPLICATION->metacache()->resolveEntry("ATLauncherPacks", QString("logos/%1").arg(file));
     auto job = new NetJob(QString("ATLauncher Icon Download %1").arg(file), APPLICATION->network());
     job->setAskRetry(false);
-    job->addNetAction(Net::ApiRequest::makeCached(QUrl(url), entry));
+    job->addNetAction(Net::ApiDownload::makeCached(QUrl(url), entry));
 
     auto fullPath = entry->getFullPath();
     connect(job, &NetJob::succeeded, this, [this, file, fullPath, job] {

@@ -5,6 +5,7 @@
 
 #include "Application.h"
 #include "minecraft/MinecraftInstance.h"
+#include "settings/Setting.h"
 #include "ui/pages/BasePage.h"
 
 class ResourceFolderModel;
@@ -19,15 +20,15 @@ class ExternalResourcesPage : public QMainWindow, public BasePage {
     Q_OBJECT
 
    public:
-    explicit ExternalResourcesPage(MinecraftInstance* instance, ResourceFolderModel* model, QWidget* parent = nullptr);
-    ~ExternalResourcesPage() override;
+    explicit ExternalResourcesPage(BaseInstance* instance, ResourceFolderModel* model, QWidget* parent = nullptr);
+    virtual ~ExternalResourcesPage();
 
-    QString displayName() const override = 0;
-    QIcon icon() const override = 0;
-    QString id() const override = 0;
-    QString helpPage() const override = 0;
+    virtual QString displayName() const override = 0;
+    virtual QIcon icon() const override = 0;
+    virtual QString id() const override = 0;
+    virtual QString helpPage() const override = 0;
 
-    bool shouldDisplay() const override = 0;
+    virtual bool shouldDisplay() const override = 0;
     QString extraHeaderInfoString();
 
     void openedImpl() override;
@@ -36,9 +37,8 @@ class ExternalResourcesPage : public QMainWindow, public BasePage {
     void retranslate() override;
 
    protected:
-    bool event(QEvent* ev) override;
     bool eventFilter(QObject* obj, QEvent* ev) override;
-    bool listFilter(QKeyEvent* keyEvent);
+    bool listFilter(QKeyEvent* ev);
     QMenu* createPopupMenu() override;
 
    public slots:
@@ -61,19 +61,18 @@ class ExternalResourcesPage : public QMainWindow, public BasePage {
     virtual void viewFolder();
     virtual void viewConfigs();
 
-    void showContextMenu(const QPoint& pos);
-    void showHeaderContextMenu(const QPoint& pos);
-
-    void lockUpdates();
-    void unlockUpdates();
+    void ShowContextMenu(const QPoint& pos);
+    void ShowHeaderContextMenu(const QPoint& pos);
 
    protected:
-    MinecraftInstance* m_instance = nullptr;
+    BaseInstance* m_instance = nullptr;
 
-    Ui::ExternalResourcesPage* m_ui = nullptr;
+    Ui::ExternalResourcesPage* ui = nullptr;
     ResourceFolderModel* m_model;
     QSortFilterProxyModel* m_filterModel = nullptr;
 
     QString m_fileSelectionFilter;
     QString m_viewFilter;
+
+    std::shared_ptr<Setting> m_wide_bar_setting = nullptr;
 };

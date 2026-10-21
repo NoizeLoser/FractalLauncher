@@ -108,31 +108,31 @@ QString findMangoHud()
         if (filePath.isEmpty()) {
             continue;
         }
-        auto conf = Json::requireObject(filePath, vkLayer);
-        if (!conf) {
-            continue;
-        }
-        auto confObject = conf.value();
-        auto layer = confObject["layer"].toObject();
-        QString libraryName = layer["library_path"].toString();
+        try {
+            auto conf = Json::requireDocument(filePath, vkLayer);
+            auto confObject = Json::requireObject(conf, vkLayer);
+            auto layer = confObject["layer"].toObject();
+            QString libraryName = layer["library_path"].toString();
 
-        if (libraryName.isEmpty()) {
-            continue;
-        }
-        if (QFileInfo(libraryName).isAbsolute()) {
-            return libraryName;
-        }
+            if (libraryName.isEmpty()) {
+                continue;
+            }
+            if (QFileInfo(libraryName).isAbsolute()) {
+                return libraryName;
+            }
 
 #ifdef __GLIBC__
-        // Check whether mangohud is usable on a glibc based system
-        QString libraryPath = find(libraryName);
-        if (!libraryPath.isEmpty()) {
-            return libraryPath;
-        }
+            // Check whether mangohud is usable on a glibc based system
+            QString libraryPath = find(libraryName);
+            if (!libraryPath.isEmpty()) {
+                return libraryPath;
+            }
 #else
-        // Without glibc return recorded shared library as-is.
-        return libraryName;
+            // Without glibc return recorded shared library as-is.
+            return libraryName;
 #endif
+        } catch (const Exception& e) {
+        }
     }
 
     return {};
@@ -141,8 +141,7 @@ QString findMangoHud()
 QString find(QString libName)
 {
 #ifdef __GLIBC__
-    auto libBytes = libName.toLocal8Bit();
-    const char* library = libBytes.constData();
+    const char* library = libName.toLocal8Bit().constData();
 
     void* handle = dlopen(library, RTLD_NOW);
     if (!handle) {

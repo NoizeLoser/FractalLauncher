@@ -46,8 +46,8 @@ class shared_qobject_ptr : public QSharedPointer<T> {
 };
 
 template <typename T, typename... Args>
-shared_qobject_ptr<T> makeShared(Args&&... args)
+shared_qobject_ptr<T> makeShared(Args... args)
 {
-    auto obj = new T(std::forward<Args>(args)...);
+    auto obj = new T(args...);
     return shared_qobject_ptr<T>(obj);
 }

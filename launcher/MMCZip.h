@@ -45,8 +45,6 @@
 #include <QString>
 #include <functional>
 #include <optional>
-
-#include "Result.h"
 #include "archive/ArchiveReader.h"
 
 #if defined(LAUNCHER_APPLICATION)
@@ -60,22 +58,22 @@ using FilterFileFunction = std::function<bool(const QFileInfo&)>;
 /**
  * take a source jar, add mods to it, resulting in target jar
  */
-Result<> createModdedJar(QString sourceJarPath, QString targetJarPath, const QList<Mod*>& mods);
+bool createModdedJar(QString sourceJarPath, QString targetJarPath, const QList<Mod*>& mods);
 #endif
 
 /**
  * Extract a subdirectory from an archive
  */
-Result<QStringList> extractSubDir(ArchiveReader* zip, const QString& subdir, const QString& target);
+std::optional<QStringList> extractSubDir(ArchiveReader* zip, const QString& subdir, const QString& target);
 
 /**
  * Extract a whole archive.
  *
  * \param fileCompressed The name of the archive.
  * \param dir The directory to extract to, the current directory if left empty.
- * \return On success, the list of the full paths of the files extracted
+ * \return The list of the full paths of the files extracted, empty on failure.
  */
-Result<QStringList> extractDir(QString fileCompressed, QString dir);
+std::optional<QStringList> extractDir(QString fileCompressed, QString dir);
 
 /**
  * Extract a subdirectory from an archive
@@ -83,9 +81,9 @@ Result<QStringList> extractDir(QString fileCompressed, QString dir);
  * \param fileCompressed The name of the archive.
  * \param subdir The directory within the archive to extract
  * \param dir The directory to extract to, the current directory if left empty.
- * \return On success, the list of the full paths of the files extracted
+ * \return The list of the full paths of the files extracted, empty on failure.
  */
-Result<QStringList> extractDir(QString fileCompressed, QString subdir, QString dir);
+std::optional<QStringList> extractDir(QString fileCompressed, QString subdir, QString dir);
 
 /**
  * Extract a single file from an archive into a directory
@@ -93,9 +91,9 @@ Result<QStringList> extractDir(QString fileCompressed, QString subdir, QString d
  * \param fileCompressed The name of the archive.
  * \param file The file within the archive to extract
  * \param dir The directory to extract to, the current directory if left empty.
- * \return the result of the operation
+ * \return true for success or false for failure
  */
-Result<> extractFile(QString fileCompressed, QString file, QString dir);
+bool extractFile(QString fileCompressed, QString file, QString dir);
 
 /**
  * Populate a QFileInfoList with a directory tree recursively, while allowing to excludeFilter what shouldn't be included.

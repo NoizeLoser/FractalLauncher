@@ -23,7 +23,7 @@ namespace Atl {
 class FilterModel : public QSortFilterProxyModel {
     Q_OBJECT
    public:
-    FilterModel(QObject* parent = nullptr);
+    FilterModel(QObject* parent = Q_NULLPTR);
     enum Sorting {
         ByPopularity,
         ByGameVersion,

@@ -3,14 +3,13 @@
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <utility>
-#include "Json.h"
 
 #include "Application.h"
 #include "Logging.h"
 #include "minecraft/auth/Parsers.h"
 #include "net/NetUtils.h"
 #include "net/RawHeaderProxy.h"
-#include "net/Request.h"
+#include "net/Upload.h"
 
 XboxAuthorizationStep::XboxAuthorizationStep(AccountData* data, Token* token, QString relyingParty, QString authorizationKind)
     : AuthStep(data), m_token(token), m_relyingParty(std::move(relyingParty)), m_authorizationKind(std::move(authorizationKind))
@@ -41,7 +40,7 @@ void XboxAuthorizationStep::perform()
     auto headers = QList<Net::HeaderPair>{ { .headerName = "Content-Type", .headerValue = "application/json" },
                                            { .headerName = "Accept", .headerValue = "application/json" },
                                            { .headerName = "x-xbl-contract-version", .headerValue = "1" } };
-    auto [request, response] = Net::Request::makeByteArray(url, xboxAuthData.toUtf8());
+    auto [request, response] = Net::Upload::makeByteArray(url, xboxAuthData.toUtf8());
     m_request = request;
     m_request->addHeaderProxy(std::make_unique<Net::RawHeaderProxy>(headers));
     m_request->enableAutoRetry(true);
@@ -96,16 +95,17 @@ void XboxAuthorizationStep::onRequestDone(QByteArray* response)
 bool XboxAuthorizationStep::processSTSError(const QByteArray& response)
 {
     if (m_request->error() == QNetworkReply::AuthenticationRequiredError) {
-        auto doc = Json::requireDocument(response, "XSTS error response");
-        if (!doc) {
-            qWarning() << "Cannot parse error XSTS response as JSON:" << doc.error();
+        QJsonParseError jsonError;
+        const QJsonDocument doc = QJsonDocument::fromJson(response, &jsonError);
+        if (jsonError.error != QJsonParseError::NoError) {
+            qWarning() << "Cannot parse error XSTS response as JSON:" << jsonError.errorString();
             emit finished(AccountTaskState::STATE_FAILED_SOFT,
-                          tr("Cannot parse %1 authorization error response as JSON: %2").arg(m_authorizationKind, doc.error()));
+                          tr("Cannot parse %1 authorization error response as JSON: %2").arg(m_authorizationKind, jsonError.errorString()));
             return true;
         }
 
         int64_t errorCode = -1;
-        auto obj = doc->object();
+        auto obj = doc.object();
         if (!Parsers::getNumber(obj.value("XErr"), errorCode)) {
             emit finished(AccountTaskState::STATE_FAILED_SOFT,
                           tr("XErr element is missing from %1 authorization error response.").arg(m_authorizationKind));

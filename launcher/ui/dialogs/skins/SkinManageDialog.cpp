@@ -17,13 +17,13 @@
  */
 
 #include "SkinManageDialog.h"
-#include "net/RPCSink.h"
 #include "ui/dialogs/skins/draw/SkinOpenGLWindow.h"
 #include "ui_SkinManageDialog.h"
 
 #include <FileSystem.h>
 #include <QAction>
 #include <QDialog>
+#include <QEventLoop>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QKeyEvent>
@@ -34,22 +34,25 @@
 #include <QUrl>
 
 #include "Application.h"
-#include "DesktopServices.h"
-#include "QObjectPtr.h"
 #include "settings/SettingsObject.h"
+#include "DesktopServices.h"
+#include "Json.h"
+#include "QObjectPtr.h"
 
 #include "minecraft/auth/Parsers.h"
+#include "minecraft/skins/CapeChange.h"
+#include "minecraft/skins/SkinDelete.h"
 #include "minecraft/skins/SkinList.h"
 #include "minecraft/skins/SkinModel.h"
-#include "minecraft/skins/SkinRequests.h"
+#include "minecraft/skins/SkinUpload.h"
 
+#include "net/Download.h"
 #include "net/NetJob.h"
-#include "net/Request.h"
 #include "tasks/Task.h"
 
-#include "Json.h"
 #include "ui/dialogs/CustomMessageBox.h"
 #include "ui/dialogs/ProgressDialog.h"
+#include "ui/instanceview/InstanceDelegate.h"
 
 SkinManageDialog::SkinManageDialog(QWidget* parent, MinecraftAccountPtr acct)
     : QDialog(parent), m_acct(acct), m_ui(new Ui::SkinManageDialog), m_list(this, APPLICATION->settings()->get("SkinsDir").toString(), acct)
@@ -65,8 +68,22 @@ SkinManageDialog::SkinManageDialog(QWidget* parent, MinecraftAccountPtr acct)
 
     setWindowModality(Qt::WindowModal);
 
-    auto* contentsWidget = m_ui->listView;
+    auto contentsWidget = m_ui->listView;
+    contentsWidget->setViewMode(QListView::IconMode);
+    contentsWidget->setFlow(QListView::LeftToRight);
+    contentsWidget->setIconSize(QSize(48, 48));
+    contentsWidget->setMovement(QListView::Static);
+    contentsWidget->setResizeMode(QListView::Adjust);
+    contentsWidget->setSelectionMode(QAbstractItemView::SingleSelection);
+    contentsWidget->setSpacing(5);
+    contentsWidget->setWordWrap(false);
+    contentsWidget->setWrapping(true);
+    contentsWidget->setUniformItemSizes(true);
+    contentsWidget->setTextElideMode(Qt::ElideRight);
+    contentsWidget->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    contentsWidget->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     contentsWidget->installEventFilter(this);
+    contentsWidget->setItemDelegate(new ListViewDelegate(this));
 
     contentsWidget->setAcceptDrops(true);
     contentsWidget->setDropIndicatorShown(true);
@@ -81,7 +98,7 @@ SkinManageDialog::SkinManageDialog(QWidget* parent, MinecraftAccountPtr acct)
 
     connect(contentsWidget->selectionModel(), &QItemSelectionModel::selectionChanged, this, &SkinManageDialog::selectionChanged);
     connect(m_ui->listView, &QListView::customContextMenuRequested, this, &SkinManageDialog::show_context_menu);
-    connect(m_ui->elytraCB, &QCheckBox::checkStateChanged, this, [this]() {
+    connect(m_ui->elytraCB, &QCheckBox::stateChanged, this, [this]() {
         if (m_skinPreview) {
             m_skinPreview->setElytraVisible(m_ui->elytraCB->isChecked());
         }
@@ -105,8 +122,9 @@ SkinManageDialog::SkinManageDialog(QWidget* parent, MinecraftAccountPtr acct)
 SkinManageDialog::~SkinManageDialog()
 {
     delete m_ui;
-
-    delete m_skinPreview;
+    if (m_skinPreview) {
+        delete m_skinPreview;
+    }
 }
 
 void SkinManageDialog::activated(QModelIndex index)
@@ -115,21 +133,18 @@ void SkinManageDialog::activated(QModelIndex index)
     accept();
 }
 
-void SkinManageDialog::selectionChanged(const QItemSelection& selected, [[maybe_unused]] const QItemSelection& deselected)
+void SkinManageDialog::selectionChanged(QItemSelection selected, [[maybe_unused]] QItemSelection deselected)
 {
-    if (selected.empty()) {
+    if (selected.empty())
         return;
-    }
 
     QString key = selected.first().indexes().first().data(Qt::UserRole).toString();
-    if (key.isEmpty()) {
+    if (key.isEmpty())
         return;
-    }
     m_selectedSkinKey = key;
-    auto* skin = getSelectedSkin();
-    if (!skin) {
+    auto skin = getSelectedSkin();
+    if (!skin)
         return;
-    }
 
     if (m_skinPreview) {
         m_skinPreview->updateScene(skin);
@@ -142,10 +157,10 @@ void SkinManageDialog::selectionChanged(const QItemSelection& selected, [[maybe_
     m_ui->alexBtn->setChecked(skin->getModel() == SkinModel::SLIM);
 }
 
-void SkinManageDialog::delayed_scroll(QModelIndex modelIndex)
+void SkinManageDialog::delayed_scroll(QModelIndex model_index)
 {
-    auto* contentsWidget = m_ui->listView;
-    contentsWidget->scrollTo(modelIndex);
+    auto contentsWidget = m_ui->listView;
+    contentsWidget->scrollTo(model_index);
 }
 
 void SkinManageDialog::on_openDirBtn_clicked()
@@ -156,24 +171,24 @@ void SkinManageDialog::on_openDirBtn_clicked()
 void SkinManageDialog::on_fileBtn_clicked()
 {
     auto filter = QMimeDatabase().mimeTypeForName("image/png").filterString();
-    QString rawPath = QFileDialog::getOpenFileName(this, tr("Select Skin Texture"), QString(), filter);
-    if (rawPath.isNull()) {
+    QString raw_path = QFileDialog::getOpenFileName(this, tr("Select Skin Texture"), QString(), filter);
+    if (raw_path.isNull()) {
         return;
     }
-    auto message = m_list.installSkin(rawPath, {});
+    auto message = m_list.installSkin(raw_path, {});
     if (!message.isEmpty()) {
         CustomMessageBox::selectable(this, tr("Selected file is not a valid skin"), message, QMessageBox::Critical)->show();
         return;
     }
 }
-namespace {
-QPixmap previewCape(const QImage& capeImage, bool elytra = false)
+
+QPixmap previewCape(QImage capeImage, bool elytra = false)
 {
     if (elytra) {
         auto wing = capeImage.copy(34, 2, 12, 20);
         QImage mirrored = wing.mirrored(true, false);
 
-        QImage combined((wing.width() * 2) + 1, wing.height() + 14, capeImage.format());
+        QImage combined(wing.width() * 2 + 1, wing.height() + 14, capeImage.format());
         combined.fill(Qt::transparent);
 
         QPainter painter(&combined);
@@ -184,7 +199,6 @@ QPixmap previewCape(const QImage& capeImage, bool elytra = false)
     }
     return QPixmap::fromImage(capeImage.copy(1, 1, 10, 16).scaled(80, 128, Qt::IgnoreAspectRatio, Qt::FastTransformation));
 }
-}  // namespace
 
 void SkinManageDialog::setupCapes()
 {
@@ -202,7 +216,7 @@ void SkinManageDialog::setupCapes()
     bool needsToDownload = false;
     for (auto& cape : accountData.minecraftProfile.capes) {
         auto path = FS::PathCombine(capesDir, cape.id + ".png");
-        if (!cape.data.isEmpty()) {
+        if (cape.data.size()) {
             QImage capeImage;
             if (capeImage.loadFromData(cape.data, "PNG") && capeImage.save(path)) {
                 m_capes[cape.id] = capeImage;
@@ -214,7 +228,7 @@ void SkinManageDialog::setupCapes()
         }
         if (!cape.url.isEmpty()) {
             needsToDownload = true;
-            job->addNetAction(Net::Request::makeFile(cape.url, path));
+            job->addNetAction(Net::Download::makeFile(cape.url, path));
         }
     }
     if (needsToDownload) {
@@ -240,7 +254,7 @@ void SkinManageDialog::setupCapes()
     }
 }
 
-void SkinManageDialog::on_capeCombo_currentIndexChanged(int /*index*/)
+void SkinManageDialog::on_capeCombo_currentIndexChanged(int index)
 {
     auto id = m_ui->capeCombo->currentData();
     auto cape = m_capes.value(id.toString(), {});
@@ -253,7 +267,7 @@ void SkinManageDialog::on_capeCombo_currentIndexChanged(int /*index*/)
     if (m_skinPreview) {
         m_skinPreview->updateCape(cape);
     }
-    if (auto* skin = getSelectedSkin(); skin) {
+    if (auto skin = getSelectedSkin(); skin) {
         skin->setCapeId(id.toString());
         if (m_skinPreview) {
             m_skinPreview->updateScene(skin);
@@ -266,7 +280,7 @@ void SkinManageDialog::on_capeCombo_currentIndexChanged(int /*index*/)
 
 void SkinManageDialog::on_steveBtn_toggled(bool checked)
 {
-    if (auto* skin = getSelectedSkin(); skin) {
+    if (auto skin = getSelectedSkin(); skin) {
         skin->setModel(checked ? SkinModel::CLASSIC : SkinModel::SLIM);
         if (m_skinPreview) {
             m_skinPreview->updateScene(skin);
@@ -279,7 +293,7 @@ void SkinManageDialog::on_steveBtn_toggled(bool checked)
 
 void SkinManageDialog::accept()
 {
-    auto* skin = m_list.skin(m_selectedSkinKey);
+    auto skin = m_list.skin(m_selectedSkinKey);
     if (!skin) {
         reject();
         return;
@@ -295,11 +309,11 @@ void SkinManageDialog::accept()
         return;
     }
 
-    skinUpload->addNetAction(makeSkinUploadRequest(m_acct->accessToken(), skin->getPath(), skin->getModelString()));
+    skinUpload->addNetAction(SkinUpload::make(m_acct->accessToken(), skin->getPath(), skin->getModelString()));
 
     auto selectedCape = skin->getCapeId();
     if (selectedCape != m_acct->accountData()->minecraftProfile.currentCape) {
-        skinUpload->addNetAction(makeCapeChangeRequest(m_acct->accessToken(), selectedCape));
+        skinUpload->addNetAction(CapeChange::make(m_acct->accessToken(), selectedCape));
     }
 
     skinUpload->addTask(m_acct->refresh().staticCast<Task>());
@@ -316,7 +330,7 @@ void SkinManageDialog::on_resetBtn_clicked()
 {
     ProgressDialog prog(this);
     NetJob::Ptr skinReset{ new NetJob(tr("Reset skin"), APPLICATION->network(), 1) };
-    skinReset->addNetAction(makeSkinDeleteRequest(m_acct->accessToken()));
+    skinReset->addNetAction(SkinDelete::make(m_acct->accessToken()));
     skinReset->addTask(m_acct->refresh().staticCast<Task>());
     if (prog.execWithTask(skinReset.get()) != QDialog::Accepted) {
         CustomMessageBox::selectable(this, tr("Skin Delete"), tr("Failed to delete current skin!"), QMessageBox::Warning)->exec();
@@ -339,7 +353,7 @@ bool SkinManageDialog::eventFilter(QObject* obj, QEvent* ev)
 {
     if (obj == m_ui->listView) {
         if (ev->type() == QEvent::KeyPress) {
-            auto* keyEvent = static_cast<QKeyEvent*>(ev);
+            QKeyEvent* keyEvent = static_cast<QKeyEvent*>(ev);
             switch (keyEvent->key()) {
                 case Qt::Key_Delete:
                     on_action_Delete_Skin_triggered(false);
@@ -355,28 +369,26 @@ bool SkinManageDialog::eventFilter(QObject* obj, QEvent* ev)
     return QDialog::eventFilter(obj, ev);
 }
 
-void SkinManageDialog::on_action_Rename_Skin_triggered(bool /*unused*/)
+void SkinManageDialog::on_action_Rename_Skin_triggered(bool)
 {
     if (!m_selectedSkinKey.isEmpty()) {
         m_ui->listView->edit(m_ui->listView->currentIndex());
     }
 }
 
-void SkinManageDialog::on_action_Delete_Skin_triggered(bool /*unused*/)
+void SkinManageDialog::on_action_Delete_Skin_triggered(bool)
 {
-    if (m_selectedSkinKey.isEmpty()) {
+    if (m_selectedSkinKey.isEmpty())
         return;
-    }
 
     if (m_list.getSkinIndex(m_selectedSkinKey) == m_list.getSelectedAccountSkin()) {
         CustomMessageBox::selectable(this, tr("Delete error"), tr("Can not delete skin that is in use."), QMessageBox::Warning)->exec();
         return;
     }
 
-    auto* skin = m_list.skin(m_selectedSkinKey);
-    if (!skin) {
+    auto skin = m_list.skin(m_selectedSkinKey);
+    if (!skin)
         return;
-    }
 
     auto response = CustomMessageBox::selectable(this, tr("Confirm Deletion"),
                                                  tr("You are about to delete \"%1\".\n"
@@ -404,7 +416,7 @@ void SkinManageDialog::on_urlBtn_clicked()
     job->setAskRetry(false);
 
     auto path = FS::PathCombine(m_list.getDir(), url.fileName());
-    job->addNetAction(Net::Request::makeFile(url, path));
+    job->addNetAction(Net::Download::makeFile(url, path));
     ProgressDialog dlg(this);
     dlg.execWithTask(job.get());
     SkinModel s(path);
@@ -423,6 +435,31 @@ void SkinManageDialog::on_urlBtn_clicked()
     }
 }
 
+class WaitTask : public Task {
+   public:
+    WaitTask() : m_loop(), m_done(false) {};
+    virtual ~WaitTask() = default;
+
+   public slots:
+    void quit()
+    {
+        m_done = true;
+        m_loop.quit();
+    }
+
+   protected:
+    virtual void executeTask()
+    {
+        if (!m_done)
+            m_loop.exec();
+        emitSucceeded();
+    };
+
+   private:
+    QEventLoop m_loop;
+    bool m_done;
+};
+
 void SkinManageDialog::on_userBtn_clicked()
 {
     auto user = m_ui->urlLine->text();
@@ -435,43 +472,72 @@ void SkinManageDialog::on_userBtn_clicked()
     NetJob::Ptr job{ new NetJob(tr("Download user skin"), APPLICATION->network(), 1) };
     job->setAskRetry(false);
 
-    auto downloadSkin = Net::Request::makeFile(QUrl(), path);
-    // use a valid url to trick the make to actually create the task
-    // the actual url will be set in the getUUID parse function
-    auto [getProfile, a] = Net::RPC::make<bool>({ { .url = { "https://sessionserver.mojang.com/session/minecraft/profile/" } },
-                                                  [downloadSkin, &mcProfile](const auto& v) -> Result<bool> {
-                                                      TRY(Parsers::parseMinecraftProfileMojang(v, mcProfile))
-                                                      downloadSkin->setUrl(mcProfile.skin.url);
-                                                      return {};
-                                                  } });
-    auto [getUUID, b] = Net::RPC::make<bool>({ { .url = "https://api.minecraftservices.com/minecraft/profile/lookup/name/" + user },
-                                               [&getProfile](const auto& v) -> Result<bool> {
-                                                   TRY_INTO(auto root, Json::requireObject(v, "Minecraft profile lookup"))
-                                                   auto id = root["id"].toString();
-                                                   if (id.isEmpty()) {
-                                                       return std::unexpected(tr("user id is empty"));
-                                                   }
-                                                   getProfile->setUrl("https://sessionserver.mojang.com/session/minecraft/profile/" + id);
-                                                   return {};
-                                               } });
+    auto uuidLoop = makeShared<WaitTask>();
+    auto profileLoop = makeShared<WaitTask>();
+
+    auto [getUUID, uuidOut] = Net::Download::makeByteArray("https://api.minecraftservices.com/minecraft/profile/lookup/name/" + user);
+    auto [getProfile, profileOut] = Net::Download::makeByteArray(QUrl());
+    auto downloadSkin = Net::Download::makeFile(QUrl(), path);
 
     QString failReason;
 
-    connect(getUUID.get(), &Task::failed, this, [&failReason](const QString& reason) {
+    connect(getUUID.get(), &Task::aborted, uuidLoop.get(), &WaitTask::quit);
+    connect(getUUID.get(), &Task::failed, this, [&failReason](QString reason) {
         qCritical() << "Couldn't get user UUID:" << reason;
         failReason = tr("failed to get user UUID");
     });
-    connect(getProfile.get(), &Task::failed, this, [&failReason](const QString& reason) {
+    connect(getUUID.get(), &Task::failed, uuidLoop.get(), &WaitTask::quit);
+    connect(getProfile.get(), &Task::aborted, profileLoop.get(), &WaitTask::quit);
+    connect(getProfile.get(), &Task::failed, profileLoop.get(), &WaitTask::quit);
+    connect(getProfile.get(), &Task::failed, this, [&failReason](QString reason) {
         qCritical() << "Couldn't get user profile:" << reason;
         failReason = tr("failed to get user profile");
     });
-    connect(downloadSkin.get(), &Task::failed, this, [&failReason](const QString& reason) {
+    connect(downloadSkin.get(), &Task::failed, this, [&failReason](QString reason) {
         qCritical() << "Couldn't download skin:" << reason;
         failReason = tr("failed to download skin");
     });
 
+    connect(getUUID.get(), &Task::succeeded, this, [uuidLoop, uuidOut, job, getProfile, &failReason] {
+        try {
+            QJsonParseError parse_error{};
+            QJsonDocument doc = QJsonDocument::fromJson(*uuidOut, &parse_error);
+            if (parse_error.error != QJsonParseError::NoError) {
+                qWarning() << "Error while parsing JSON response from Minecraft skin service at" << parse_error.offset
+                           << "reason:" << parse_error.errorString();
+                failReason = tr("failed to parse get user UUID response");
+                uuidLoop->quit();
+                return;
+            }
+            const auto root = doc.object();
+            auto id = root["id"].toString();
+            if (!id.isEmpty()) {
+                getProfile->setUrl("https://sessionserver.mojang.com/session/minecraft/profile/" + id);
+            } else {
+                failReason = tr("user id is empty");
+                job->abort();
+            }
+        } catch (const Exception& e) {
+            qCritical() << "Couldn't load skin json:" << e.cause();
+            failReason = tr("failed to parse get user UUID response");
+        }
+        uuidLoop->quit();
+    });
+
+    connect(getProfile.get(), &Task::succeeded, this, [profileLoop, profileOut, job, getProfile, &mcProfile, downloadSkin, &failReason] {
+        if (Parsers::parseMinecraftProfileMojang(*profileOut, mcProfile)) {
+            downloadSkin->setUrl(mcProfile.skin.url);
+        } else {
+            failReason = tr("failed to parse get user profile response");
+            job->abort();
+        }
+        profileLoop->quit();
+    });
+
     job->addNetAction(getUUID);
+    job->addTask(uuidLoop);
     job->addNetAction(getProfile);
+    job->addTask(profileLoop);
     job->addNetAction(downloadSkin);
     ProgressDialog dlg(this);
     dlg.execWithTask(job.get());
@@ -498,7 +564,7 @@ void SkinManageDialog::on_userBtn_clicked()
 
 void SkinManageDialog::resizeEvent(QResizeEvent* event)
 {
-    QDialog::resizeEvent(event);
+    QWidget::resizeEvent(event);
     QSize s = size() * (1. / 3);
 
     auto id = m_ui->capeCombo->currentData();
@@ -508,7 +574,7 @@ void SkinManageDialog::resizeEvent(QResizeEvent* event)
     } else {
         m_ui->capeImage->clear();
     }
-    if (auto* skin = getSelectedSkin(); skin && !m_skinPreview) {
+    if (auto skin = getSelectedSkin(); skin && !m_skinPreview) {
         m_skinPreviewLabel->setPixmap(
             QPixmap::fromImage(skin->getPreview()).scaled(m_skinPreviewLabel->size(), Qt::KeepAspectRatio, Qt::FastTransformation));
     }
@@ -516,7 +582,7 @@ void SkinManageDialog::resizeEvent(QResizeEvent* event)
 
 SkinModel* SkinManageDialog::getSelectedSkin()
 {
-    if (auto* skin = m_list.skin(m_selectedSkinKey); skin && skin->isValid()) {
+    if (auto skin = m_list.skin(m_selectedSkinKey); skin && skin->isValid()) {
         return skin;
     }
     return nullptr;

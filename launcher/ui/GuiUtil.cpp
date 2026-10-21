@@ -42,12 +42,11 @@
 #include <QClipboard>
 #include <QFileDialog>
 #include <QStandardPaths>
-#include <expected>
-#include <utility>
 
 #include "FileSystem.h"
 #include "logs/AnonymizeLog.h"
 #include "net/NetJob.h"
+#include "net/NetRequest.h"
 #include "net/PasteUpload.h"
 #include "ui/dialogs/CustomMessageBox.h"
 #include "ui/dialogs/ProgressDialog.h"
@@ -57,16 +56,15 @@
 #include <settings/SettingsObject.h>
 #include "Application.h"
 
-constexpr int g_MaxMclogsLines = 25000;
-constexpr int g_InitialMclogsLines = 10000;
-constexpr int g_FinalMclogsLines = 14900;
+constexpr int MaxMclogsLines = 25000;
+constexpr int InitialMclogsLines = 10000;
+constexpr int FinalMclogsLines = 14900;
 
-namespace {
 QString truncateLogForMclogs(const QString& logContent)
 {
     QStringList lines = logContent.split("\n");
-    if (lines.size() > g_MaxMclogsLines) {
-        QString truncatedLog = lines.mid(0, g_InitialMclogsLines).join("\n");
+    if (lines.size() > MaxMclogsLines) {
+        QString truncatedLog = lines.mid(0, InitialMclogsLines).join("\n");
         truncatedLog +=
             "\n\n\n\n\n\n\n\n\n\n"
             "------------------------------------------------------------\n"
@@ -75,96 +73,93 @@ QString truncateLogForMclogs(const QString& logContent)
             "----- Middle portion omitted to fit mclo.gs size limits ----\n"
             "------------------------------------------------------------\n"
             "\n\n\n\n\n\n\n\n\n\n";
-        truncatedLog += lines.mid(lines.size() - g_FinalMclogsLines - 1).join("\n");
+        truncatedLog += lines.mid(lines.size() - FinalMclogsLines - 1).join("\n");
         return truncatedLog;
     }
     return logContent;
 }
-}  // namespace
 
-Result<std::optional<QString>> GuiUtil::uploadPaste(const QString& name, const QFileInfo& filePath, QWidget* parentWidget)
+std::optional<QString> GuiUtil::uploadPaste(const QString& name, const QFileInfo& filePath, QWidget* parentWidget)
 {
-    return FS::read(filePath.absoluteFilePath()).and_then([&name, &parentWidget](const auto& v) {
-        return uploadPaste(name, v, parentWidget);
-    });
+    return uploadPaste(name, FS::read(filePath.absoluteFilePath()), parentWidget);
 };
 
-Result<std::optional<QString>> GuiUtil::uploadPaste(const QString& name, const QString& data, QWidget* parentWidget)
+std::optional<QString> GuiUtil::uploadPaste(const QString& name, const QString& text, QWidget* parentWidget)
 {
     ProgressDialog dialog(parentWidget);
-    auto pasteType = static_cast<PasteUpload::Type>(APPLICATION->settings()->get("PastebinType").toInt());
+    auto pasteType = static_cast<PasteUpload::PasteType>(APPLICATION->settings()->get("PastebinType").toInt());
     auto baseURL = APPLICATION->settings()->get("PastebinCustomAPIBase").toString();
     bool shouldTruncate = false;
 
-    if (baseURL.isEmpty()) {
-        baseURL = pasteType.defaultBase();
-    }
+    if (baseURL.isEmpty())
+        baseURL = PasteUpload::PasteTypes[pasteType].defaultBase;
 
-    auto url = QUrl(baseURL);
-    if (!url.isValid()) {
-        return std::unexpected("baseURL is not valid");
-    }
+    if (auto url = QUrl(baseURL); url.isValid()) {
+        auto response = CustomMessageBox::selectable(parentWidget, QObject::tr("Confirm Upload"),
+                                                     QObject::tr("You are about to upload \"%1\" to %2.\n"
+                                                                 "You should double-check for personal information.\n\n"
+                                                                 "Are you sure?")
+                                                         .arg(name, url.host()),
+                                                     QMessageBox::Warning, QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
+                            ->exec();
 
-    auto response = CustomMessageBox::selectable(parentWidget, QObject::tr("Confirm Upload"),
-                                                 QObject::tr("You are about to upload \"%1\" to %2.\n"
-                                                             "You should double-check for personal information.\n\n"
-                                                             "Are you sure?")
-                                                     .arg(name, url.host()),
-                                                 QMessageBox::Warning, QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
-                        ->exec();
-
-    if (response != QMessageBox::Yes) {
-        return {};
-    }
-
-    if (pasteType == PasteUpload::Type::Mclogs && data.count("\n") > g_MaxMclogsLines) {
-        auto truncateResponse =
-            CustomMessageBox::selectable(parentWidget, QObject::tr("Confirm Truncation"),
-                                         QObject::tr("The log has %1 lines, exceeding mclo.gs' limit of %2.\n"
-                                                     "The launcher can keep the first %3 and last %4 lines, trimming the middle.\n\n"
-                                                     "If you choose 'No', mclo.gs will only keep the first %2 lines, cutting off "
-                                                     "potentially useful info like crashes at the end.\n\n"
-                                                     "Proceed with truncation?")
-                                             .arg(data.count("\n"))
-                                             .arg(g_MaxMclogsLines)
-                                             .arg(g_InitialMclogsLines)
-                                             .arg(g_FinalMclogsLines),
-                                         QMessageBox::Warning, QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel, QMessageBox::No)
-                ->exec();
-
-        if (truncateResponse == QMessageBox::Cancel) {
+        if (response != QMessageBox::Yes)
             return {};
+
+        if (baseURL == "https://api.mclo.gs" && text.count("\n") > MaxMclogsLines) {
+            auto truncateResponse = CustomMessageBox::selectable(
+                                        parentWidget, QObject::tr("Confirm Truncation"),
+                                        QObject::tr("The log has %1 lines, exceeding mclo.gs' limit of %2.\n"
+                                                    "The launcher can keep the first %3 and last %4 lines, trimming the middle.\n\n"
+                                                    "If you choose 'No', mclo.gs will only keep the first %2 lines, cutting off "
+                                                    "potentially useful info like crashes at the end.\n\n"
+                                                    "Proceed with truncation?")
+                                            .arg(text.count("\n"))
+                                            .arg(MaxMclogsLines)
+                                            .arg(InitialMclogsLines)
+                                            .arg(FinalMclogsLines),
+                                        QMessageBox::Warning, QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel, QMessageBox::No)
+                                        ->exec();
+
+            if (truncateResponse == QMessageBox::Cancel) {
+                return {};
+            }
+            shouldTruncate = truncateResponse == QMessageBox::Yes;
         }
-        shouldTruncate = truncateResponse == QMessageBox::Yes;
     }
 
-    QString textToUpload = data;
+    QString textToUpload = text;
     if (shouldTruncate) {
-        textToUpload = truncateLogForMclogs(data);
+        textToUpload = truncateLogForMclogs(text);
     }
 
     auto job = NetJob::Ptr(new NetJob("Log Upload", APPLICATION->network()));
 
-    auto [pasteJob, pasteLink] = pasteType.make(std::move(textToUpload), baseURL);
-    job->addNetAction(pasteJob);
-    QObject::connect(job.get(), &Task::failed, parentWidget, [parentWidget](const QString& reason) {
+    auto pasteJob = new PasteUpload(textToUpload, baseURL, pasteType);
+    job->addNetAction(Net::NetRequest::Ptr(pasteJob));
+    QObject::connect(job.get(), &Task::failed, [parentWidget](QString reason) {
         CustomMessageBox::selectable(parentWidget, QObject::tr("Failed to upload logs!"), reason, QMessageBox::Critical)->show();
+    });
+    QObject::connect(job.get(), &Task::aborted, [parentWidget] {
+        CustomMessageBox::selectable(parentWidget, QObject::tr("Logs upload aborted"),
+                                     QObject::tr("The task has been aborted by the user."), QMessageBox::Information)
+            ->show();
     });
 
     if (dialog.execWithTask(job.get()) == QDialog::Accepted) {
-        if (pasteLink->isEmpty()) {
+        if (pasteJob->pasteLink().isEmpty()) {
             CustomMessageBox::selectable(parentWidget, QObject::tr("Failed to upload logs!"), "The upload link is empty",
                                          QMessageBox::Critical)
                 ->show();
-            return std::unexpected("The upload link is empty");
+            return {};
         }
-        setClipboardText(*pasteLink);
+        setClipboardText(pasteJob->pasteLink());
         CustomMessageBox::selectable(
             parentWidget, QObject::tr("Upload finished"),
-            QObject::tr("The <a href=\"%1\">link to the uploaded log</a> has been placed in your clipboard.").arg(*pasteLink),
+            QObject::tr("The <a href=\"%1\">link to the uploaded log</a> has been placed in your clipboard.").arg(pasteJob->pasteLink()),
             QMessageBox::Information)
             ->exec();
-        return *pasteLink;
+        return pasteJob->pasteLink();
     }
     return {};
 }
@@ -175,15 +170,14 @@ void GuiUtil::setClipboardText(QString text)
     QApplication::clipboard()->setText(text);
 }
 
-namespace {
-QStringList browseForFileInternal(const QString& context,
-                                  const QString& caption,
-                                  const QString& filter,
-                                  const QString& defaultPath,
-                                  QWidget* parentWidget,
-                                  bool single)
+static QStringList BrowseForFileInternal(QString context,
+                                         QString caption,
+                                         QString filter,
+                                         QString defaultPath,
+                                         QWidget* parentWidget,
+                                         bool single)
 {
-    static QMap<QString, QString> s_savedPaths;
+    static QMap<QString, QString> savedPaths;
 
     QFileDialog w(parentWidget, caption);
     QSet<QString> locations;
@@ -200,7 +194,7 @@ QStringList browseForFileInternal(const QString& context,
     f(QStandardPaths::DownloadLocation);
     f(QStandardPaths::HomeLocation);
     QList<QUrl> urls;
-    for (const auto& location : locations) {
+    for (auto location : locations) {
         urls.append(QUrl::fromLocalFile(location));
     }
     urls.append(QUrl::fromLocalFile(defaultPath));
@@ -210,8 +204,8 @@ QStringList browseForFileInternal(const QString& context,
     w.setNameFilter(filter);
 
     QString pathToOpen;
-    if (s_savedPaths.contains(context)) {
-        pathToOpen = s_savedPaths[context];
+    if (savedPaths.contains(context)) {
+        pathToOpen = savedPaths[context];
     } else {
         pathToOpen = defaultPath;
     }
@@ -224,33 +218,24 @@ QStringList browseForFileInternal(const QString& context,
 
     w.setSidebarUrls(urls);
 
-    if (w.exec() != 0) {
-        s_savedPaths[context] = w.directory().absolutePath();
+    if (w.exec()) {
+        savedPaths[context] = w.directory().absolutePath();
         return w.selectedFiles();
     }
-    s_savedPaths[context] = w.directory().absolutePath();
+    savedPaths[context] = w.directory().absolutePath();
     return {};
 }
-}  // namespace
 
-QString GuiUtil::browseForFile(const QString& context,
-                               const QString& caption,
-                               const QString& filter,
-                               const QString& defaultPath,
-                               QWidget* parentWidget)
+QString GuiUtil::BrowseForFile(QString context, QString caption, QString filter, QString defaultPath, QWidget* parentWidget)
 {
-    auto resultList = browseForFileInternal(context, caption, filter, defaultPath, parentWidget, true);
-    if (!resultList.isEmpty()) {
+    auto resultList = BrowseForFileInternal(context, caption, filter, defaultPath, parentWidget, true);
+    if (resultList.size()) {
         return resultList[0];
     }
-    return {};
+    return QString();
 }
 
-QStringList GuiUtil::browseForFiles(const QString& context,
-                                    const QString& caption,
-                                    const QString& filter,
-                                    const QString& defaultPath,
-                                    QWidget* parentWidget)
+QStringList GuiUtil::BrowseForFiles(QString context, QString caption, QString filter, QString defaultPath, QWidget* parentWidget)
 {
-    return browseForFileInternal(context, caption, filter, defaultPath, parentWidget, false);
+    return BrowseForFileInternal(context, caption, filter, defaultPath, parentWidget, false);
 }

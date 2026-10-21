@@ -34,11 +34,10 @@
  */
 
 #include "WorldList.h"
-#include "WorldTasks.h"
 
 #include <FileSystem.h>
 #include <QDebug>
-#include <QDirListing>
+#include <QDirIterator>
 #include <QFileSystemWatcher>
 #include <QMimeData>
 #include <QString>
@@ -47,13 +46,13 @@
 #include <QUuid>
 #include <Qt>
 
-WorldList::WorldList(const QString& dir, BaseInstance* instance)
-    : m_instance(instance), m_watcher(new QFileSystemWatcher(this)), m_isWatching(false), m_dir(dir)
+WorldList::WorldList(const QString& dir, BaseInstance* instance) : QAbstractListModel(), m_instance(instance), m_dir(dir)
 {
     FS::ensureFolderPathExists(m_dir.absolutePath());
     m_dir.setFilter(QDir::Readable | QDir::NoDotAndDotDot | QDir::Files | QDir::Dirs);
     m_dir.setSorting(QDir::Name | QDir::IgnoreCase | QDir::LocaleAware);
-
+    m_watcher = new QFileSystemWatcher(this);
+    m_isWatching = false;
     connect(m_watcher, &QFileSystemWatcher::directoryChanged, this, &WorldList::directoryChanged);
 }
 
@@ -86,18 +85,16 @@ void WorldList::stopWatching()
 
 bool WorldList::update()
 {
-    if (!isValid()) {
+    if (!isValid())
         return false;
-    }
 
     QList<World> newWorlds;
     m_dir.refresh();
     auto folderContents = m_dir.entryInfoList();
     // if there are any untracked files...
-    for (const auto& entry : folderContents) {
-        if (!entry.isDir()) {
+    for (QFileInfo entry : folderContents) {
+        if (!entry.isDir())
             continue;
-        }
 
         World w(entry);
         if (w.isValid()) {
@@ -111,7 +108,7 @@ bool WorldList::update()
     return true;
 }
 
-void WorldList::directoryChanged(const QString& /*unused*/)
+void WorldList::directoryChanged(QString)
 {
     update();
 }
@@ -126,23 +123,18 @@ QString WorldList::instDirPath() const
     return QFileInfo(m_instance->instanceRoot()).absoluteFilePath();
 }
 
-bool WorldList::removeWorldFromModel(const QFileInfo& sourceFile)
+bool WorldList::deleteWorld(int index)
 {
-    const auto sourcePath = sourceFile.absoluteFilePath();
-
-    for (int row = 0; row < m_worlds.size(); ++row) {
-        if (m_worlds.at(row).container().absoluteFilePath() != sourcePath) {
-            continue;
-        }
-
-        beginRemoveRows(QModelIndex(), row, row);
-        m_worlds.removeAt(row);
+    if (index >= m_worlds.size() || index < 0)
+        return false;
+    World& m = m_worlds[index];
+    if (m.destroy()) {
+        beginRemoveRows(QModelIndex(), index, index);
+        m_worlds.removeAt(index);
         endRemoveRows();
-
         emit changed();
         return true;
     }
-
     return false;
 }
 
@@ -161,9 +153,8 @@ bool WorldList::deleteWorlds(int first, int last)
 
 bool WorldList::resetIcon(int row)
 {
-    if (row >= m_worlds.size() || row < 0) {
+    if (row >= m_worlds.size() || row < 0)
         return false;
-    }
     World& m = m_worlds[row];
     if (m.resetIcon()) {
         QModelIndex modelIndex = index(row, NameColumn);
@@ -180,20 +171,18 @@ int WorldList::columnCount(const QModelIndex& parent) const
 
 QVariant WorldList::data(const QModelIndex& index, int role) const
 {
-    if (!index.isValid()) {
-        return {};
-    }
+    if (!index.isValid())
+        return QVariant();
 
     int row = index.row();
     int column = index.column();
 
-    if (row < 0 || row >= m_worlds.size()) {
-        return {};
-    }
+    if (row < 0 || row >= m_worlds.size())
+        return QVariant();
 
     QLocale locale;
 
-    const auto& world = m_worlds[row];
+    auto& world = m_worlds[row];
     switch (role) {
         case Qt::DisplayRole:
             switch (column) {
@@ -218,13 +207,12 @@ QVariant WorldList::data(const QModelIndex& index, int role) const
                     }
                     return "";
                 default:
-                    return {};
+                    return QVariant();
             }
 
         case Qt::UserRole:
-            if (column == SizeColumn) {
+            if (column == SizeColumn)
                 return QVariant::fromValue<qlonglong>(world.bytes());
-            }
             return data(index, Qt::DisplayRole);
 
         case Qt::ToolTipRole: {
@@ -319,27 +307,24 @@ QMimeData* WorldList::mimeData(const QModelIndexList& indexes) const
     QList<QUrl> urls;
 
     for (auto idx : indexes) {
-        if (idx.column() != 0) {
+        if (idx.column() != 0)
             continue;
-        }
 
         int row = idx.row();
-        if (row < 0 || row >= this->m_worlds.size()) {
+        if (row < 0 || row >= this->m_worlds.size())
             continue;
-        }
 
         const World& world = m_worlds[row];
 
-        if (!world.isValid() || !world.isOnFS()) {
+        if (!world.isValid() || !world.isOnFS())
             continue;
-        }
 
         QString worldPath = world.container().absoluteFilePath();
         qDebug() << worldPath;
         urls.append(QUrl::fromLocalFile(worldPath));
     }
 
-    auto* result = new QMimeData();
+    auto result = new QMimeData();
     result->setUrls(urls);
     return result;
 }
@@ -347,10 +332,10 @@ QMimeData* WorldList::mimeData(const QModelIndexList& indexes) const
 Qt::ItemFlags WorldList::flags(const QModelIndex& index) const
 {
     Qt::ItemFlags defaultFlags = QAbstractListModel::flags(index);
-    if (index.isValid()) {
+    if (index.isValid())
         return Qt::ItemIsUserCheckable | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled | defaultFlags;
-    }
-    return Qt::ItemIsDropEnabled | defaultFlags;
+    else
+        return Qt::ItemIsDropEnabled | defaultFlags;
 }
 
 Qt::DropActions WorldList::supportedDragActions() const
@@ -365,7 +350,7 @@ Qt::DropActions WorldList::supportedDropActions() const
     return Qt::CopyAction | Qt::MoveAction;
 }
 
-void WorldList::installWorld(const QFileInfo& filename)
+void WorldList::installWorld(QFileInfo filename)
 {
     qDebug() << "installing:" << filename.absoluteFilePath();
     World w(filename);
@@ -375,71 +360,27 @@ void WorldList::installWorld(const QFileInfo& filename)
     w.install(m_dir.absolutePath());
 }
 
-std::unique_ptr<Task> WorldList::createInstallWorldTask(const QFileInfo& filename)
-{
-    return std::make_unique<InstallWorldTask>(InstallWorldTask::Args{
-        .worlds = this,
-        .sourceFile = filename,
-        .targetDir = m_dir.absolutePath(),
-    });
-}
-
-std::unique_ptr<Task> WorldList::createCopyWorldTask(int index, const QString& name)
-{
-    if (index >= m_worlds.size() || index < 0) {
-        return nullptr;
-    }
-
-    const auto& world = m_worlds.at(index);
-
-    return std::make_unique<CopyWorldTask>(CopyWorldTask::Args{
-        .worlds = this,
-        .sourceFile = world.container(),
-        .targetDir = m_dir.absolutePath(),
-        .targetName = name,
-    });
-}
-
-std::unique_ptr<Task> WorldList::createDeleteWorldTask(int index)
-{
-    if (index >= m_worlds.size() || index < 0) {
-        return nullptr;
-    }
-
-    const auto& world = m_worlds.at(index);
-
-    return std::make_unique<DeleteWorldTask>(DeleteWorldTask::Args{
-        .worlds = this,
-        .sourceFile = world.container(),
-        .displayName = world.name(),
-    });
-}
-
 bool WorldList::dropMimeData(const QMimeData* data,
                              Qt::DropAction action,
                              [[maybe_unused]] int row,
                              [[maybe_unused]] int column,
                              [[maybe_unused]] const QModelIndex& parent)
 {
-    if (action == Qt::IgnoreAction) {
+    if (action == Qt::IgnoreAction)
         return true;
-    }
     // check if the action is supported
-    if ((data == nullptr) || !(action & supportedDropActions())) {
+    if (!data || !(action & supportedDropActions()))
         return false;
-    }
     // files dropped from outside?
     if (data->hasUrls()) {
-        bool wasWatching = m_isWatching;
-        if (wasWatching) {
+        bool was_watching = m_isWatching;
+        if (was_watching)
             stopWatching();
-        }
         auto urls = data->urls();
-        for (const auto& url : urls) {
+        for (auto url : urls) {
             // only local files may be dropped...
-            if (!url.isLocalFile()) {
+            if (!url.isLocalFile())
                 continue;
-            }
             QString filename = url.toLocalFile();
 
             QFileInfo worldInfo(filename);
@@ -448,32 +389,28 @@ bool WorldList::dropMimeData(const QMimeData* data,
                 installWorld(worldInfo);
             }
         }
-        if (wasWatching) {
+        if (was_watching)
             startWatching();
-        }
         return true;
     }
     return false;
 }
-namespace {
 
 int64_t calculateWorldSize(const QFileInfo& file)
 {
     if (file.isFile() && file.suffix() == "zip") {
         return file.size();
-    }
-    if (file.isDir()) {
+    } else if (file.isDir()) {
+        QDirIterator it(file.absoluteFilePath(), QDir::Files, QDirIterator::Subdirectories);
         int64_t total = 0;
-        for (const auto& entry :
-             QDirListing(file.absoluteFilePath(), QDirListing::IteratorFlag::FilesOnly | QDirListing::IteratorFlag::ResolveSymlinks |
-                                                      QDirListing::IteratorFlag::Recursive)) {
-            total += entry.fileInfo().size();
+        while (it.hasNext()) {
+            it.next();
+            total += it.fileInfo().size();
         }
         return total;
     }
     return -1;
 }
-}  // namespace
 
 void WorldList::loadWorldsAsync()
 {
@@ -481,17 +418,17 @@ void WorldList::loadWorldsAsync()
         auto file = m_worlds.at(i).container();
         int row = i;
         QThreadPool::globalInstance()->start([this, file, row]() mutable {
-            World w(file);
-            w.loadMetadata();
-            w.setSize(calculateWorldSize(file));
+            auto size = calculateWorldSize(file);
 
             QMetaObject::invokeMethod(
                 this,
-                [this, w, row, file]() {
+                [this, size, row, file]() {
                     if (row < m_worlds.size() && m_worlds[row].container() == file) {
-                        m_worlds[row] = w;
+                        m_worlds[row].setSize(size);
 
-                        emit dataChanged(index(row, 0), index(row, columnCount(QModelIndex()) - 1));
+                        // Notify views
+                        QModelIndex modelIndex = index(row, SizeColumn);
+                        emit dataChanged(modelIndex, modelIndex, { SizeRole });
                     }
                 },
                 Qt::QueuedConnection);

@@ -47,7 +47,7 @@
 #include "MojangDownloadInfo.h"
 #include "Rule.h"
 #include "RuntimeContext.h"
-#include "net/Request.h"
+#include "net/NetRequest.h"
 
 class Library;
 class MinecraftInstance;
@@ -144,7 +144,7 @@ class Library {
     bool isForge() const;
 
     // Get a list of downloads for this library
-    QList<Net::Request::Ptr> getDownloads(const RuntimeContext& runtimeContext,
+    QList<Net::NetRequest::Ptr> getDownloads(const RuntimeContext& runtimeContext,
                                              class HttpMetaCache* cache,
                                              QStringList& failedLocalFiles,
                                              const QString& overridePath) const;

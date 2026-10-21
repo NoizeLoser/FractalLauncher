@@ -35,32 +35,37 @@
 
 #include "IconUtils.h"
 
-#include <QDirListing>
-#include <QFileInfo>
+#include <QDirIterator>
+#include "FileSystem.h"
 
-static const QStringList g_validIconExtensions = { { "svg", "png", "ico", "gif", "jpg", "jpeg", "webp" } };
+namespace {
+static const QStringList validIconExtensions = { { "svg", "png", "ico", "gif", "jpg", "jpeg", "webp" } };
+}
 
 namespace IconUtils {
 
 QString findBestIconIn(const QString& folder, const QString& iconKey)
 {
-    for (const auto& entry : QDirListing(folder, QDirListing::IteratorFlag::FilesOnly | QDirListing::IteratorFlag::ResolveSymlinks)) {
-        auto fileInfo = entry.fileInfo();
-        if ((fileInfo.completeBaseName() == iconKey || fileInfo.fileName() == iconKey) && isIconSuffix(fileInfo.suffix())) {
+    QString best_filename;
+
+    QDirIterator it(folder, QDir::NoDotAndDotDot | QDir::Files, QDirIterator::NoIteratorFlags);
+    while (it.hasNext()) {
+        it.next();
+        auto fileInfo = it.fileInfo();
+        if ((fileInfo.completeBaseName() == iconKey || fileInfo.fileName() == iconKey) && isIconSuffix(fileInfo.suffix()))
             return fileInfo.absoluteFilePath();
-        }
     }
     return {};
 }
 
 QString getIconFilter()
 {
-    return "(*." + g_validIconExtensions.join(" *.") + ")";
+    return "(*." + validIconExtensions.join(" *.") + ")";
 }
 
-bool isIconSuffix(const QString& suffix)
+bool isIconSuffix(QString suffix)
 {
-    return g_validIconExtensions.contains(suffix);
+    return validIconExtensions.contains(suffix);
 }
 
 }  // namespace IconUtils

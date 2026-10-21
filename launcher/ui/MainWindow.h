@@ -40,23 +40,27 @@
 
 #pragma once
 
+#include <memory>
+
 #include <QMainWindow>
 #include <QProcess>
 #include <QTimer>
 
+#include "BaseInstance.h"
 #include "minecraft/auth/MinecraftAccount.h"
 
 class LaunchController;
 class NewsChecker;
 class QToolButton;
 class InstanceProxyModel;
+class LabeledToolButton;
 class QLabel;
-class MinecraftInstance;
 class MinecraftLauncher;
 class BaseProfilerFactory;
 class InstanceView;
 class KonamiCode;
 class InstanceTask;
+class LabeledToolButton;
 
 namespace Ui {
 class MainWindow;
@@ -125,8 +129,6 @@ class MainWindow : public QMainWindow {
     void checkForUpdates();
 
     void on_actionSettings_triggered();
-
-    void on_actionManageSkins_triggered();
 
     void on_actionManageAccounts_triggered();
 
@@ -217,13 +219,9 @@ class MainWindow : public QMainWindow {
    private:
     void retranslateUi();
 
-    void updateNameLabel();
-
-    void updateInstanceToolBarOrientation(Qt::Orientation orientation);
-
     void addInstance(const QString& url = QString(), const QMap<QString, QString>& extra_info = {});
+    void activateInstance(BaseInstance* instance);
     void setCatBackground(bool enabled);
-    void updateCatState();
     void updateInstanceToolIcon(QString new_icon);
     void setSelectedInstanceById(const QString& id);
     void updateStatusCenter();
@@ -240,15 +238,16 @@ class MainWindow : public QMainWindow {
     QToolButton* newsLabel = nullptr;
     QLabel* m_statusLeft = nullptr;
     QLabel* m_statusCenter = nullptr;
-    QToolButton* changeIconButton = nullptr;
-    QAction* instanceInfoWidget = nullptr;
-    QLabel* nameLabel = nullptr;
+    LabeledToolButton* changeIconButton = nullptr;
+    LabeledToolButton* renameButton = nullptr;
     QToolButton* helpMenuButton = nullptr;
     KonamiCode* secretEventFilter = nullptr;
 
+    std::shared_ptr<Setting> instanceToolbarSetting = nullptr;
+
     unique_qobject_ptr<NewsChecker> m_newsChecker;
 
-    MinecraftInstance* m_selectedInstance = nullptr;
+    BaseInstance* m_selectedInstance = nullptr;
     QString m_currentInstIcon;
 
     // managed by the application object

@@ -43,25 +43,34 @@
 #include <QUrl>
 #include <QUuid>
 #include <QVariant>
+#include <memory>
 
-#include "Result.h"
+#include "Exception.h"
 
 namespace Json {
+class JsonException : public ::Exception {
+   public:
+    JsonException(const QString& message) : Exception(message) {}
+};
 
-Result<> write(const QJsonDocument& doc, const QString& filename);
-Result<> write(const QJsonObject& object, const QString& filename);
-Result<> write(const QJsonArray& array, const QString& filename);
+/// @throw FileSystemException
+void write(const QJsonDocument& doc, const QString& filename);
+/// @throw FileSystemException
+void write(const QJsonObject& object, const QString& filename);
+/// @throw FileSystemException
+void write(const QJsonArray& array, const QString& filename);
 
 QByteArray toText(const QJsonObject& obj);
 QByteArray toText(const QJsonArray& array);
 
-Result<QJsonDocument> requireDocument(const QByteArray& data, const QString& what = "Document");
-Result<QJsonDocument> requireDocument(const QString& filename, const QString& what = "Document");
-Result<QJsonObject> requireObject(const QByteArray& data, const QString& what = "Document");
-Result<QJsonObject> requireObject(const QString& filename, const QString& what = "Document");
-Result<QJsonObject> requireObject(const QJsonDocument& doc, const QString& what = "Document");
-Result<QJsonArray> requireArray(const QByteArray& data, const QString& what = "Document");
-Result<QJsonArray> requireArray(const QJsonDocument& doc, const QString& what = "Document");
+/// @throw JsonException
+QJsonDocument requireDocument(const QByteArray& data, const QString& what = "Document");
+/// @throw JsonException
+QJsonDocument requireDocument(const QString& filename, const QString& what = "Document");
+/// @throw JsonException
+QJsonObject requireObject(const QJsonDocument& doc, const QString& what = "Document");
+/// @throw JsonException
+QJsonArray requireArray(const QJsonDocument& doc, const QString& what = "Document");
 
 /////////////////// WRITING ////////////////////
 
@@ -74,17 +83,17 @@ QJsonValue toJson(const T& t)
     return QJsonValue(t);
 }
 template <>
-QJsonValue toJson<QUrl>(const QUrl& t);
+QJsonValue toJson<QUrl>(const QUrl& url);
 template <>
-QJsonValue toJson<QByteArray>(const QByteArray& t);
+QJsonValue toJson<QByteArray>(const QByteArray& data);
 template <>
-QJsonValue toJson<QDateTime>(const QDateTime& t);
+QJsonValue toJson<QDateTime>(const QDateTime& datetime);
 template <>
-QJsonValue toJson<QDir>(const QDir& t);
+QJsonValue toJson<QDir>(const QDir& dir);
 template <>
-QJsonValue toJson<QUuid>(const QUuid& t);
+QJsonValue toJson<QUuid>(const QUuid& uuid);
 template <>
-QJsonValue toJson<QVariant>(const QVariant& t);
+QJsonValue toJson<QVariant>(const QVariant& variant);
 
 template <typename T>
 QJsonArray toJsonArray(const QList<T>& container)
@@ -101,87 +110,101 @@ QJsonArray toJsonArray(const QList<T>& container)
 // Attempt to parse JSON up until garbage is encountered
 QJsonDocument parseUntilGarbage(const QByteArray& json, QJsonParseError* error = nullptr, QString* garbage = nullptr);
 
+/// @throw JsonException
 template <typename T>
-Result<T> requireIsType(const QJsonValue& value, const QString& what = "Value");
+T requireIsType(const QJsonValue& value, const QString& what = "Value");
 
+/// @throw JsonException
 template <>
-Result<double> requireIsType<double>(const QJsonValue& value, const QString& what);
+double requireIsType<double>(const QJsonValue& value, const QString& what);
+/// @throw JsonException
 template <>
-Result<bool> requireIsType<bool>(const QJsonValue& value, const QString& what);
+bool requireIsType<bool>(const QJsonValue& value, const QString& what);
+/// @throw JsonException
 template <>
-Result<int> requireIsType<int>(const QJsonValue& value, const QString& what);
+int requireIsType<int>(const QJsonValue& value, const QString& what);
+/// @throw JsonException
 template <>
-Result<QJsonObject> requireIsType<QJsonObject>(const QJsonValue& value, const QString& what);
+QJsonObject requireIsType<QJsonObject>(const QJsonValue& value, const QString& what);
+/// @throw JsonException
 template <>
-Result<QJsonArray> requireIsType<QJsonArray>(const QJsonValue& value, const QString& what);
+QJsonArray requireIsType<QJsonArray>(const QJsonValue& value, const QString& what);
+/// @throw JsonException
 template <>
-Result<QJsonValue> requireIsType<QJsonValue>(const QJsonValue& value, const QString& what);
+QJsonValue requireIsType<QJsonValue>(const QJsonValue& value, const QString& what);
+/// @throw JsonException
 template <>
-Result<QByteArray> requireIsType<QByteArray>(const QJsonValue& value, const QString& what);
+QByteArray requireIsType<QByteArray>(const QJsonValue& value, const QString& what);
+/// @throw JsonException
 template <>
-Result<QDateTime> requireIsType<QDateTime>(const QJsonValue& value, const QString& what);
+QDateTime requireIsType<QDateTime>(const QJsonValue& value, const QString& what);
+/// @throw JsonException
 template <>
-Result<QVariant> requireIsType<QVariant>(const QJsonValue& value, const QString& what);
+QVariant requireIsType<QVariant>(const QJsonValue& value, const QString& what);
+/// @throw JsonException
 template <>
-Result<QString> requireIsType<QString>(const QJsonValue& value, const QString& what);
+QString requireIsType<QString>(const QJsonValue& value, const QString& what);
+/// @throw JsonException
 template <>
-Result<QUuid> requireIsType<QUuid>(const QJsonValue& value, const QString& what);
+QUuid requireIsType<QUuid>(const QJsonValue& value, const QString& what);
+/// @throw JsonException
 template <>
-Result<QDir> requireIsType<QDir>(const QJsonValue& value, const QString& what);
+QDir requireIsType<QDir>(const QJsonValue& value, const QString& what);
+/// @throw JsonException
 template <>
-Result<QUrl> requireIsType<QUrl>(const QJsonValue& value, const QString& what);
+QUrl requireIsType<QUrl>(const QJsonValue& value, const QString& what);
 
 // the following functions are higher level functions, that make use of the above functions for
 // type conversion
 
+/// @throw JsonException
 template <typename T>
-Result<T> requireIsType(const QJsonObject& parent, const QString& key, const QString& what = "__placeholder__")
+T requireIsType(const QJsonObject& parent, const QString& key, const QString& what = "__placeholder__")
 {
     const QString localWhat = QString(what).replace("__placeholder__", '\'' + key + '\'');
     if (!parent.contains(key)) {
-        return std::unexpected(localWhat + " is missing from its parent object");
+        throw JsonException(localWhat + "s parent does not contain " + localWhat);
     }
     return requireIsType<T>(parent.value(key), localWhat);
 }
 
 template <typename T>
-Result<QList<T>> requireIsArrayOf(const QJsonDocument& doc)
+QList<T> requireIsArrayOf(const QJsonDocument& doc)
 {
-    TRY_INTO(const auto& array, requireArray(doc))
+    const QJsonArray array = requireArray(doc);
     QList<T> out;
     for (const QJsonValue val : array) {
-        TRY_INTO(const auto& t, requireIsType<T>(val, "Document"))
-        out.append(t);
+        out.append(requireIsType<T>(val, "Document"));
     }
     return out;
 }
 
+/// @throw JsonException
 template <typename T>
-Result<QList<T>> requireIsArrayOf(const QJsonObject& parent, const QString& key, const QString& what = "__placeholder__")
+QList<T> requireIsArrayOf(const QJsonObject& parent, const QString& key, const QString& what = "__placeholder__")
 {
     const QString localWhat = QString(what).replace("__placeholder__", '\'' + key + '\'');
     if (!parent.contains(key)) {
-        return std::unexpected(localWhat + " is missing from its parent object");
+        throw JsonException(localWhat + "s parent does not contain " + localWhat);
     }
 
     const QJsonArray array = parent[key].toArray();
     QList<T> out;
     for (const QJsonValue val : array) {
-        TRY_INTO(const auto& t, requireIsType<T>(val, localWhat))
-        out.append(t);
+        out.append(requireIsType<T>(val, "Document"));
     }
     return out;
 }
 
 // this macro part could be replaced by variadic functions that just pass on their arguments, but that wouldn't work well with IDE helpers
-#define JSON_HELPERFUNCTIONS(NAME, TYPE)                                                                                      \
-    inline Result<TYPE> require##NAME(const QJsonValue& value, const QString& what = "Value")                                 \
-    {                                                                                                                         \
-        return requireIsType<TYPE>(value, what);                                                                              \
-    }                                                                                                                         \
-    inline Result<TYPE> require##NAME(const QJsonObject& parent, const QString& key, const QString& what = "__placeholder__") \
-    {                                                                                                                         \
-        return requireIsType<TYPE>(parent, key, what);                                                                        \
+#define JSON_HELPERFUNCTIONS(NAME, TYPE)                                                                              \
+    inline TYPE require##NAME(const QJsonValue& value, const QString& what = "Value")                                 \
+    {                                                                                                                 \
+        return requireIsType<TYPE>(value, what);                                                                      \
+    }                                                                                                                 \
+    inline TYPE require##NAME(const QJsonObject& parent, const QString& key, const QString& what = "__placeholder__") \
+    {                                                                                                                 \
+        return requireIsType<TYPE>(parent, key, what);                                                                \
     }
 
 JSON_HELPERFUNCTIONS(Array, QJsonArray)
@@ -208,3 +231,4 @@ QVariantMap toMap(const QString& jsonString);
 QString fromMap(const QVariantMap& map);
 
 }  // namespace Json
+using JSONValidationError = Json::JsonException;

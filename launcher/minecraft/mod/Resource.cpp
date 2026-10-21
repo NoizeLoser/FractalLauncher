@@ -1,140 +1,117 @@
 #include "Resource.h"
 
+#include <QDirIterator>
 #include <QFileInfo>
-#include <QObject>
 #include <QRegularExpression>
 #include <tuple>
-#include <utility>
 
 #include "FileSystem.h"
 #include "StringUtils.h"
-#include "Version.h"
 #include "minecraft/MinecraftInstance.h"
 #include "minecraft/PackProfile.h"
 
-Resource::Resource(const QFileInfo& fileInfo)
+Resource::Resource(QObject* parent) : QObject(parent) {}
+
+Resource::Resource(QFileInfo file_info) : QObject()
 {
-    setFile(fileInfo);
+    setFile(file_info);
 }
 
-void Resource::setFile(QFileInfo fileInfo)
+void Resource::setFile(QFileInfo file_info)
 {
-    m_fileInfo = std::move(fileInfo);
+    m_file_info = file_info;
     parseFile();
 }
 
-namespace {
-std::tuple<QString, qint64> calculateFileSize(const QFileInfo& file)
+static std::tuple<QString, qint64> calculateFileSize(const QFileInfo& file)
 {
     if (file.isDir()) {
         auto dir = QDir(file.absoluteFilePath());
         dir.setFilter(QDir::AllEntries | QDir::NoDotAndDotDot);
         auto count = dir.count();
         auto str = QObject::tr("item");
-        if (count != 1) {
+        if (count != 1)
             str = QObject::tr("items");
-        }
         return { QString("%1 %2").arg(QString::number(count), str), count };
     }
-    return { StringUtils::humanReadableFileSize(static_cast<double>(file.size()), true), file.size() };
+    return { StringUtils::humanReadableFileSize(file.size(), true), file.size() };
 }
-}  // namespace
 
 void Resource::parseFile()
 {
-    QString fileName{ m_fileInfo.fileName() };
+    QString file_name{ m_file_info.fileName() };
 
     m_type = ResourceType::UNKNOWN;
 
-    m_internalId = fileName;
+    m_internal_id = file_name;
 
-    std::tie(m_sizeStr, m_sizeInfo) = calculateFileSize(m_fileInfo);
-    m_hardLinkCount = m_fileInfo.exists() ? FS::hardLinkCount(m_fileInfo.absoluteFilePath()) : 0;
-    if (m_fileInfo.isDir()) {
+    std::tie(m_size_str, m_size_info) = calculateFileSize(m_file_info);
+    m_hardLinkCount = FS::hardLinkCount(m_file_info.absoluteFilePath());
+    if (m_file_info.isDir()) {
         m_type = ResourceType::FOLDER;
-        m_name = fileName;
-    } else if (m_fileInfo.isFile()) {
-        if (fileName.endsWith(".disabled")) {
-            fileName.chop(9);
+        m_name = file_name;
+    } else if (m_file_info.isFile()) {
+        if (file_name.endsWith(".disabled")) {
+            file_name.chop(9);
             m_enabled = false;
         }
 
-        if (fileName.endsWith(".zip") || fileName.endsWith(".jar")) {
+        if (file_name.endsWith(".zip") || file_name.endsWith(".jar")) {
             m_type = ResourceType::ZIPFILE;
-            fileName.chop(4);
-        } else if (fileName.endsWith(".nilmod")) {
+            file_name.chop(4);
+        } else if (file_name.endsWith(".nilmod")) {
             m_type = ResourceType::ZIPFILE;
-            fileName.chop(7);
-        } else if (fileName.endsWith(".litemod")) {
+            file_name.chop(7);
+        } else if (file_name.endsWith(".litemod")) {
             m_type = ResourceType::LITEMOD;
-            fileName.chop(8);
+            file_name.chop(8);
         } else {
             m_type = ResourceType::SINGLEFILE;
         }
 
-        m_name = fileName;
+        m_name = file_name;
     }
 
-    m_changedDateTime = m_fileInfo.lastModified();
+    m_changed_date_time = m_file_info.lastModified();
 }
 
 auto Resource::name() const -> QString
 {
-    if (metadata()) {
+    if (metadata())
         return metadata()->name;
-    }
 
     return m_name;
 }
 
-namespace {
-void removeThePrefix(QString& string)
+static void removeThePrefix(QString& string)
 {
     static const QRegularExpression s_regex(QStringLiteral("^(?:the|teh) +"), QRegularExpression::CaseInsensitiveOption);
     string.remove(s_regex);
     string = string.trimmed();
 }
-}  // namespace
 
 auto Resource::provider() const -> QString
 {
-    if (metadata()) {
+    if (metadata())
         return ModPlatform::ProviderCapabilities::readableName(metadata()->provider);
-    }
 
-    return QObject::tr("Unknown");
-}
-
-auto Resource::version() const -> QString
-{
-    if (metadata()) {
-        return metadata()->versionNumber;
-    }
-
-    return QObject::tr("Unknown");
+    return tr("Unknown");
 }
 
 auto Resource::homepage() const -> QString
 {
-    if (metadata()) {
-        return ModPlatform::getMetaURL(metadata()->provider, metadata()->projectId);
-    }
+    if (metadata())
+        return ModPlatform::getMetaURL(metadata()->provider, metadata()->project_id);
 
     return {};
 }
 
-bool Resource::lockUpdate() const
-{
-    return metadata() && metadata()->lockUpdate;
-}
-
 void Resource::setMetadata(std::shared_ptr<Metadata::ModStruct>&& metadata)
 {
-    if (status() == ResourceStatus::NoMetadata) {
-        setStatus(ResourceStatus::Installed);
-    }
+    if (status() == ResourceStatus::NO_METADATA)
+        setStatus(ResourceStatus::INSTALLED);
 
-    m_metadata = std::move(metadata);
+    m_metadata = metadata;
 }
 
 QStringList Resource::issues() const
@@ -143,13 +120,13 @@ QStringList Resource::issues() const
     result.reserve(m_issues.length());
 
     for (const char* issue : m_issues) {
-        result.append(QObject::tr(issue));
+        result.append(tr(issue));
     }
 
     return result;
 }
 
-void Resource::updateIssues(const MinecraftInstance* inst)
+void Resource::updateIssues(const BaseInstance* inst)
 {
     m_issues.clear();
 
@@ -157,7 +134,12 @@ void Resource::updateIssues(const MinecraftInstance* inst)
         return;
     }
 
-    auto* profile = inst->getPackProfile();
+    auto mcInst = dynamic_cast<const MinecraftInstance*>(inst);
+    if (mcInst == nullptr) {
+        return;
+    }
+
+    auto profile = mcInst->getPackProfile();
     QString mcVersion = profile->getComponentVersion("net.minecraft");
 
     if (!m_metadata->mcVersions.empty() && !m_metadata->mcVersions.contains(mcVersion)) {
@@ -170,77 +152,46 @@ int Resource::compare(const Resource& other, SortType type) const
 {
     switch (type) {
         default:
-        case SortType::Enabled:
-            if (enabled() && !other.enabled()) {
+        case SortType::ENABLED:
+            if (enabled() && !other.enabled())
                 return 1;
-            }
-            if (!enabled() && other.enabled()) {
+            if (!enabled() && other.enabled())
                 return -1;
-            }
             break;
-        case SortType::Name: {
-            QString thisName{ name() };
-            QString otherName{ other.name() };
+        case SortType::NAME: {
+            QString this_name{ name() };
+            QString other_name{ other.name() };
 
             // TODO do we need this? it could result in 0 being returned
-            removeThePrefix(thisName);
-            removeThePrefix(otherName);
+            removeThePrefix(this_name);
+            removeThePrefix(other_name);
 
-            return QString::compare(thisName, otherName, Qt::CaseInsensitive);
+            return QString::compare(this_name, other_name, Qt::CaseInsensitive);
         }
-        case SortType::Date:
-            if (dateTimeChanged() > other.dateTimeChanged()) {
+        case SortType::DATE:
+            if (dateTimeChanged() > other.dateTimeChanged())
                 return 1;
-            }
-            if (dateTimeChanged() < other.dateTimeChanged()) {
+            if (dateTimeChanged() < other.dateTimeChanged())
                 return -1;
-            }
             break;
-        case SortType::Filename:
-            return fileinfo().fileName().localeAwareCompare(other.fileinfo().fileName());
-
-        case SortType::Size: {
+        case SortType::SIZE: {
             if (this->type() != other.type()) {
-                if (this->type() == ResourceType::FOLDER) {
+                if (this->type() == ResourceType::FOLDER)
                     return -1;
-                }
-                if (other.type() == ResourceType::FOLDER) {
+                if (other.type() == ResourceType::FOLDER)
                     return 1;
-                }
             }
 
-            if (sizeInfo() > other.sizeInfo()) {
+            if (sizeInfo() > other.sizeInfo())
                 return 1;
-            }
-            if (sizeInfo() < other.sizeInfo()) {
+            if (sizeInfo() < other.sizeInfo())
                 return -1;
-            }
             break;
         }
-
-        case SortType::Version: {
-            auto thisVer = Version(version());
-            auto otherVer = Version(other.version());
-            if (thisVer > otherVer) {
-                return 1;
-            }
-            if (thisVer < otherVer) {
-                return -1;
-            }
-            break;
-        }
-
-        case SortType::Provider: {
-            auto compareResult = QString::compare(provider(), other.provider(), Qt::CaseInsensitive);
-            if (compareResult != 0) {
-                return compareResult;
-            }
-            break;
-        }
-        case SortType::LockUpdate: {
-            if (lockUpdate() != other.lockUpdate()) {
-                return lockUpdate() ? -1 : 1;
-            }
+        case SortType::PROVIDER: {
+            auto compare_result = QString::compare(provider(), other.provider(), Qt::CaseInsensitive);
+            if (compare_result != 0)
+                return compare_result;
             break;
         }
     }
@@ -248,24 +199,17 @@ int Resource::compare(const Resource& other, SortType type) const
     return 0;
 }
 
-bool Resource::applyFilter(const QRegularExpression& filter) const
+bool Resource::applyFilter(QRegularExpression filter) const
 {
-    if (filter.match(name()).hasMatch()) {
-        return true;
-    }
-    if (filter.match(fileinfo().fileName()).hasMatch()) {
-        return true;
-    }
-    return false;
+    return filter.match(name()).hasMatch();
 }
 
 bool Resource::enable(EnableAction action)
 {
-    if (m_type == ResourceType::UNKNOWN || m_type == ResourceType::FOLDER) {
+    if (m_type == ResourceType::UNKNOWN || m_type == ResourceType::FOLDER)
         return false;
-    }
 
-    QString path = m_fileInfo.absoluteFilePath();
+    QString path = m_file_info.absoluteFilePath();
     QFile file(path);
 
     bool enable = true;
@@ -282,16 +226,14 @@ bool Resource::enable(EnableAction action)
             break;
     }
 
-    if (m_enabled == enable) {
+    if (m_enabled == enable)
         return false;
-    }
 
     if (enable) {
         // m_enabled is false, but there's no '.disabled' suffix.
         // TODO: Report error?
-        if (!path.endsWith(".disabled")) {
+        if (!path.endsWith(".disabled"))
             return false;
-        }
         path.chop(9);
     } else {
         path += ".disabled";
@@ -299,9 +241,8 @@ bool Resource::enable(EnableAction action)
             path = FS::getUniqueResourceName(path);
         }
     }
-    if (!file.rename(path)) {
+    if (!file.rename(path))
         return false;
-    }
 
     setFile(QFileInfo(path));
 
@@ -309,39 +250,38 @@ bool Resource::enable(EnableAction action)
     return true;
 }
 
-auto Resource::destroy(const QDir& indexDir, bool preserveMetadata, bool attemptTrash) -> bool
+auto Resource::destroy(const QDir& index_dir, bool preserve_metadata, bool attempt_trash) -> bool
 {
     m_type = ResourceType::UNKNOWN;
 
-    if (!preserveMetadata) {
+    if (!preserve_metadata) {
         qDebug() << QString("Destroying metadata for '%1' on purpose").arg(name());
-        destroyMetadata(indexDir);
+        destroyMetadata(index_dir);
     }
 
-    return (attemptTrash && FS::trash(m_fileInfo.filePath())) || FS::deletePath(m_fileInfo.filePath());
+    return (attempt_trash && FS::trash(m_file_info.filePath())) || FS::deletePath(m_file_info.filePath());
 }
 
-auto Resource::destroyMetadata(const QDir& indexDir) -> void
+auto Resource::destroyMetadata(const QDir& index_dir) -> void
 {
     if (metadata()) {
-        Metadata::remove(indexDir, metadata()->slug);
+        Metadata::remove(index_dir, metadata()->slug);
     } else {
         auto n = name();
-        Metadata::remove(indexDir, n);
+        Metadata::remove(index_dir, n);
     }
     m_metadata = nullptr;
 }
 
 bool Resource::isSymLinkUnder(const QString& instPath) const
 {
-    if (isSymLink()) {
+    if (isSymLink())
         return true;
-    }
 
     auto instDir = QDir(instPath);
 
-    auto relAbsPath = instDir.relativeFilePath(m_fileInfo.absoluteFilePath());
-    auto relCanonPath = instDir.relativeFilePath(m_fileInfo.canonicalFilePath());
+    auto relAbsPath = instDir.relativeFilePath(m_file_info.absoluteFilePath());
+    auto relCanonPath = instDir.relativeFilePath(m_file_info.canonicalFilePath());
 
     return relAbsPath != relCanonPath;
 }
@@ -353,10 +293,9 @@ bool Resource::isMoreThanOneHardLink() const
 
 auto Resource::getOriginalFileName() const -> QString
 {
-    auto fileName = m_fileInfo.fileName();
-    if (!m_enabled) {
+    auto fileName = m_file_info.fileName();
+    if (!m_enabled)
         fileName.chop(9);
-    }
     return fileName;
 }
 
@@ -386,16 +325,16 @@ QDebug operator<<(QDebug debug, ResourceType type)
 QDebug operator<<(QDebug debug, ResourceStatus status)
 {
     switch (status) {
-        case ResourceStatus::Installed:
+        case ResourceStatus::INSTALLED:
             debug << "INSTALLED";
             break;
-        case ResourceStatus::NotInstalled:
+        case ResourceStatus::NOT_INSTALLED:
             debug << "NOT_INSTALLED";
             break;
-        case ResourceStatus::NoMetadata:
+        case ResourceStatus::NO_METADATA:
             debug << "NO_METADATA";
             break;
-        case ResourceStatus::Unknown:
+        case ResourceStatus::UNKNOWN:
         default:
             debug << "UNKNOWN";
             break;

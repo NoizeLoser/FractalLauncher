@@ -132,19 +132,15 @@ void ImportPage::updateState()
             auto addonId = query.allQueryItemValues("addonId")[0];
             auto fileId = query.allQueryItemValues("fileId")[0];
 
-            auto [job, array] = FlameAPI::getFile(addonId, fileId);
+            auto api = FlameAPI();
+            auto [job, array] = api.getFile(addonId, fileId);
 
-            connect(job.get(), &NetJob::failed, this, [this](const QString& reason) {
-                CustomMessageBox::selectable(this, tr("Error"), reason, QMessageBox::Critical)->show();
-            });
+            connect(job.get(), &NetJob::failed, this,
+                    [this](QString reason) { CustomMessageBox::selectable(this, tr("Error"), reason, QMessageBox::Critical)->show(); });
             connect(job.get(), &NetJob::succeeded, this, [this, array, addonId, fileId] {
                 qDebug() << "Returned CFURL Json:\n" << array->toStdString().c_str();
                 auto doc = Json::requireDocument(*array);
-                if (!doc) {
-                    CustomMessageBox::selectable(this, tr("Error"), doc.error(), QMessageBox::Critical)->show();
-                    return;
-                }
-                auto data = doc->object()["data"].toObject();
+                auto data = doc.object()["data"].toObject();
                 // No way to find out if it's a mod or a modpack before here
                 // And also we need to check if it ends with .zip, instead of any better way
                 auto fileName = data["fileName"].toString();
@@ -175,7 +171,7 @@ void ImportPage::updateState()
                 }
             });
             ProgressDialog dlUrlDialod(this);
-            dlUrlDialod.showSkipButton();
+            dlUrlDialod.setSkipButton(true, tr("Abort"));
             dlUrlDialod.execWithTask(job.get());
             return;
         } else {

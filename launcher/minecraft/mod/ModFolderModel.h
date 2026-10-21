@@ -46,6 +46,7 @@
 
 #include "Mod.h"
 #include "ResourceFolderModel.h"
+#include "minecraft/Component.h"
 #include "minecraft/mod/Resource.h"
 
 class BaseInstance;
@@ -58,8 +59,9 @@ class QFileSystemWatcher;
 class ModFolderModel : public ResourceFolderModel {
     Q_OBJECT
    public:
-    enum Columns : std::uint8_t {
+    enum Columns {
         ActiveColumn = 0,
+        ImageColumn,
         NameColumn,
         VersionColumn,
         DateColumn,
@@ -71,23 +73,19 @@ class ModFolderModel : public ResourceFolderModel {
         ReleaseTypeColumn,
         RequiresColumn,
         RequiredByColumn,
-        FileNameColumn,
-        LockUpdateColumn,
-        NumColumns
+        NUM_COLUMNS
     };
-    ModFolderModel(const QDir& dir, MinecraftInstance* instance, bool isIndexed, bool createDir, QObject* parent = nullptr);
+    ModFolderModel(const QDir& dir, BaseInstance* instance, bool is_indexed, bool create_dir, QObject* parent = nullptr);
 
-    QString id() const override { return "mods"; }
+    virtual QString id() const override { return "mods"; }
 
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
-
-    QList<MultiDecorationItemDelegate::Icon> icons(int row) const override;
 
     QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override;
     int columnCount(const QModelIndex& parent) const override;
 
     [[nodiscard]] Resource* createResource(const QFileInfo& file) override { return new Mod(file); }
-    [[nodiscard]] Task* createParseTask(Resource& /*unused*/) override;
+    [[nodiscard]] Task* createParseTask(Resource&) override;
 
     bool isValid();
 
@@ -96,15 +94,14 @@ class ModFolderModel : public ResourceFolderModel {
 
     QModelIndexList getAffectedMods(const QModelIndexList& indexes, EnableAction action);
 
-    QStringList requiresList(const QString& id) const;
-    QStringList requiredByList(const QString& id) const;
-
-    bool supportsImage() const override { return true; }
-
     RESOURCE_HELPERS(Mod)
 
+   public:
+    QStringList requiresList(QString id);
+    QStringList requiredByList(QString id);
+
    private slots:
-    void onParseSucceeded(int ticket, const QString& resourceId) override;
+    void onParseSucceeded(int ticket, QString resource_id) override;
     void onParseFinished();
 
    private:

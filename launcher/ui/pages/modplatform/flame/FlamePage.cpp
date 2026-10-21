@@ -34,6 +34,7 @@
  */
 
 #include "FlamePage.h"
+#include "Version.h"
 #include "modplatform/ModIndex.h"
 #include "modplatform/ResourceAPI.h"
 #include "ui/dialogs/CustomMessageBox.h"
@@ -50,33 +51,30 @@
 #include "ui/dialogs/NewInstanceDialog.h"
 #include "ui/widgets/ProjectItem.h"
 
+static FlameAPI api;
+
 FlamePage::FlamePage(NewInstanceDialog* dialog, QWidget* parent)
-    : QWidget(parent), m_ui(new Ui::FlamePage), m_dialog(dialog), m_listModel(new Flame::ListModel(this)), m_fetchProgress(this, false)
+    : QWidget(parent), m_ui(new Ui::FlamePage), m_dialog(dialog), m_fetch_progress(this, false)
 {
     m_ui->setupUi(this);
-
+    m_ui->searchEdit->installEventFilter(this);
+    m_listModel = new Flame::ListModel(this);
     m_ui->packView->setModel(m_listModel);
 
     m_ui->versionSelectionBox->view()->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_ui->versionSelectionBox->view()->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    m_ui->versionSelectionBox->view()->parentWidget()->setMaximumHeight(300);
 
-    m_searchTimer.setTimerType(Qt::TimerType::CoarseTimer);
-    m_searchTimer.setSingleShot(true);
+    m_search_timer.setTimerType(Qt::TimerType::CoarseTimer);
+    m_search_timer.setSingleShot(true);
 
-    connect(&m_searchTimer, &QTimer::timeout, this, &FlamePage::triggerSearch);
+    connect(&m_search_timer, &QTimer::timeout, this, &FlamePage::triggerSearch);
 
-    connect(m_ui->searchEdit, &QLineEdit::textEdited, this, [this] {
-        if (m_searchTimer.isActive()) {
-            m_searchTimer.stop();
-        }
-        m_searchTimer.start(350);
-    });
+    m_fetch_progress.hideIfInactive(true);
+    m_fetch_progress.setFixedHeight(24);
+    m_fetch_progress.progressFormat("");
 
-    m_fetchProgress.hideIfInactive(true);
-    m_fetchProgress.setFixedHeight(24);
-    m_fetchProgress.progressFormat("");
-
-    m_ui->verticalLayout->insertWidget(2, &m_fetchProgress);
+    m_ui->verticalLayout->insertWidget(2, &m_fetch_progress);
 
     // index is used to set the sorting with the curseforge api
     m_ui->sortByBox->addItem(tr("Sort by Featured"));
@@ -98,6 +96,24 @@ FlamePage::FlamePage(NewInstanceDialog* dialog, QWidget* parent)
 FlamePage::~FlamePage()
 {
     delete m_ui;
+}
+
+bool FlamePage::eventFilter(QObject* watched, QEvent* event)
+{
+    if (watched == m_ui->searchEdit && event->type() == QEvent::KeyPress) {
+        QKeyEvent* keyEvent = static_cast<QKeyEvent*>(event);
+        if (keyEvent->key() == Qt::Key_Return) {
+            triggerSearch();
+            keyEvent->accept();
+            return true;
+        } else {
+            if (m_search_timer.isActive())
+                m_search_timer.stop();
+
+            m_search_timer.start(350);
+        }
+    }
+    return QWidget::eventFilter(watched, event);
 }
 
 bool FlamePage::shouldDisplay() const
@@ -124,7 +140,7 @@ void FlamePage::triggerSearch()
     m_ui->versionSelectionBox->clear();
     bool filterChanged = m_filterWidget->changed();
     m_listModel->searchWithTerm(m_ui->searchEdit->text(), m_ui->sortByBox->currentIndex(), m_filterWidget->getFilter(), filterChanged);
-    m_fetchProgress.watch(m_listModel->activeSearchJob().get());
+    m_fetch_progress.watch(m_listModel->activeSearchJob().get());
 }
 
 void FlamePage::onSelectionChanged(QModelIndex curr, [[maybe_unused]] QModelIndex prev)
@@ -147,7 +163,7 @@ void FlamePage::onSelectionChanged(QModelIndex curr, [[maybe_unused]] QModelInde
 
         auto addonId = m_current->addonId;
         // Use default if no callbacks are set
-        callbacks.onSucceed = [this, curr, addonId](auto& doc) {
+        callbacks.on_succeed = [this, curr, addonId](auto& doc) {
             if (addonId != m_current->addonId) {
                 return;  // wrong request
             }
@@ -155,22 +171,28 @@ void FlamePage::onSelectionChanged(QModelIndex curr, [[maybe_unused]] QModelInde
             m_current->versions = doc;
             m_current->versionsLoaded = true;
             auto pred = [this](const ModPlatform::IndexedVersion& v) {
-                if (auto filter = m_filterWidget->getFilter()) {
+                if (auto filter = m_filterWidget->getFilter())
                     return !filter->checkModpackFilters(v);
-                }
                 return false;
             };
+#if QT_VERSION >= QT_VERSION_CHECK(6, 1, 0)
             m_current->versions.removeIf(pred);
-            for (const auto& version : m_current->versions) {
+#else
+            for (auto it = m_current->versions.begin(); it != m_current->versions.end();)
+                if (pred(*it))
+                    it = m_current->versions.erase(it);
+                else
+                    ++it;
+#endif
+            for (auto version : m_current->versions) {
                 m_ui->versionSelectionBox->addItem(version.getVersionDisplayString(), QVariant(version.downloadUrl));
             }
 
-            QVariant currentUpdated;
-            currentUpdated.setValue(m_current);
+            QVariant current_updated;
+            current_updated.setValue(m_current);
 
-            if (!m_listModel->setData(curr, currentUpdated, Qt::UserRole)) {
+            if (!m_listModel->setData(curr, current_updated, Qt::UserRole))
                 qWarning() << "Failed to cache versions for the current pack!";
-            }
 
             // TODO: Check whether it's a connection issue or the project disabled 3rd-party distribution.
             if (m_current->versionsLoaded && m_ui->versionSelectionBox->count() < 1) {
@@ -178,17 +200,16 @@ void FlamePage::onSelectionChanged(QModelIndex curr, [[maybe_unused]] QModelInde
             }
             suggestCurrent();
         };
-        callbacks.onFail = [this](const QString& reason, int) {
+        callbacks.on_fail = [this](QString reason, int) {
             CustomMessageBox::selectable(this, tr("Error"), reason, QMessageBox::Critical)->exec();
         };
 
-        auto netJob = FlameAPI::get().getProjectVersions(
-            { .pack = m_current, .mcVersions = {}, .loaders = {}, .resourceType = ModPlatform::ResourceType::Modpack }, callbacks);
+        auto netJob = api.getProjectVersions({ m_current, {}, {}, ModPlatform::ResourceType::Modpack }, std::move(callbacks));
 
         m_job = netJob;
         netJob->start();
     } else {
-        for (const auto& version : m_current->versions) {
+        for (auto version : m_current->versions) {
             m_ui->versionSelectionBox->addItem(version.version, QVariant(version.downloadUrl));
         }
 
@@ -200,34 +221,6 @@ void FlamePage::onSelectionChanged(QModelIndex curr, [[maybe_unused]] QModelInde
         m_ui->versionSelectionBox->addItem(tr("No version is available!"), -1);
     }
 
-    if (!m_current->extraDataLoaded) {
-        qDebug() << "Loading flame modpack extra info";
-
-        auto addonId = m_current->addonId;
-
-        auto [job, response] = FlameAPI::get().getProjectTask(addonId.toString(), true);
-
-        QObject::connect(job.get(), &NetJob::succeeded, job.get(), [this, addonId, response] {
-            if (addonId != m_current->addonId) {
-                return;  // wrong request
-            }
-
-            // Preserve any version data already loaded into the pack, since the project request only carries the pack info
-            auto versions = std::move(m_current->versions);
-            auto versionsLoaded = m_current->versionsLoaded;
-            *m_current = *response;
-            m_current->versions = std::move(versions);
-            m_current->versionsLoaded = versionsLoaded;
-
-            updateUi();
-        });
-        QObject::connect(job.get(), &NetJob::failed, job.get(),
-                         [](const QString& reason) { qWarning() << "Failed to load extra info for the current pack:" << reason; });
-
-        m_extraJob = job;
-        m_extraJob->start();
-    }
-
     updateUi();
 }
 
@@ -237,36 +230,36 @@ void FlamePage::suggestCurrent()
         return;
     }
 
-    if (m_selectedVersionIndex == -1) {
+    if (m_selected_version_index == -1) {
         m_dialog->setSuggestedPack();
         return;
     }
 
-    auto version = m_current->versions.at(m_selectedVersionIndex);
+    auto version = m_current->versions.at(m_selected_version_index);
 
-    QMap<QString, QString> extraInfo;
-    extraInfo.insert("pack_id", m_current->addonId.toString());
-    extraInfo.insert("pack_version_id", version.fileId.toString());
+    QMap<QString, QString> extra_info;
+    extra_info.insert("pack_id", m_current->addonId.toString());
+    extra_info.insert("pack_version_id", version.fileId.toString());
 
-    m_dialog->setSuggestedPack(m_current->name, new InstanceImportTask(version.downloadUrl, true, this, std::move(extraInfo)));
+    m_dialog->setSuggestedPack(m_current->name, new InstanceImportTask(version.downloadUrl, true, this, std::move(extra_info)));
     QString editedLogoName = "curseforge_" + m_current->logoName;
     m_listModel->getLogo(m_current->logoName, m_current->logoUrl,
-                         [this, editedLogoName](const QString& logo) { m_dialog->setSuggestedIconFromFile(logo, editedLogoName); });
+                         [this, editedLogoName](QString logo) { m_dialog->setSuggestedIconFromFile(logo, editedLogoName); });
 }
 
 void FlamePage::onVersionSelectionChanged(int index)
 {
-    bool isBlocked = false;
-    m_ui->versionSelectionBox->itemData(index).toInt(&isBlocked);
+    bool is_blocked = false;
+    m_ui->versionSelectionBox->itemData(index).toInt(&is_blocked);
 
-    if (index == -1 || isBlocked) {
-        m_selectedVersionIndex = -1;
+    if (index == -1 || is_blocked) {
+        m_selected_version_index = -1;
         return;
     }
 
-    m_selectedVersionIndex = index;
+    m_selected_version_index = index;
 
-    Q_ASSERT(m_current->versions.at(m_selectedVersionIndex).downloadUrl == m_ui->versionSelectionBox->currentData().toString());
+    Q_ASSERT(m_current->versions.at(m_selected_version_index).downloadUrl == m_ui->versionSelectionBox->currentData().toString());
 
     suggestCurrent();
 }
@@ -276,11 +269,10 @@ void FlamePage::updateUi()
     QString text = "";
     QString name = m_current->name;
 
-    if (m_current->websiteUrl.isEmpty()) {
+    if (m_current->websiteUrl.isEmpty())
         text = name;
-    } else {
+    else
         text = "<a href=\"" + m_current->websiteUrl + "\">" + name + "</a>";
-    }
     if (!m_current->authors.empty()) {
         auto authorToStr = [](ModPlatform::ModpackAuthor& author) {
             if (author.url.isEmpty()) {
@@ -301,21 +293,16 @@ void FlamePage::updateUi()
             text += "<br><br>" + tr("External links:") + "<br>";
         }
 
-        if (!m_current->extraData.issuesUrl.isEmpty()) {
+        if (!m_current->extraData.issuesUrl.isEmpty())
             text += "- " + tr("Issues: <a href=%1>%1</a>").arg(m_current->extraData.issuesUrl) + "<br>";
-        }
-        if (!m_current->extraData.wikiUrl.isEmpty()) {
+        if (!m_current->extraData.wikiUrl.isEmpty())
             text += "- " + tr("Wiki: <a href=%1>%1</a>").arg(m_current->extraData.wikiUrl) + "<br>";
-        }
-        if (!m_current->extraData.sourceUrl.isEmpty()) {
+        if (!m_current->extraData.sourceUrl.isEmpty())
             text += "- " + tr("Source code: <a href=%1>%1</a>").arg(m_current->extraData.sourceUrl) + "<br>";
-        }
     }
 
-    if (m_current->extraDataLoaded && !m_current->extraData.body.isEmpty()) {
-        text += "<hr>";
-        text += m_current->extraData.body;
-    }
+    text += "<hr>";
+    text += api.getModDescription(m_current->addonId.toInt()).toUtf8();
 
     m_ui->packDescription->setHtml(StringUtils::htmlListPatch(text + m_current->description));
     m_ui->packDescription->flush();
@@ -332,12 +319,12 @@ void FlamePage::setSearchTerm(QString term)
 
 void FlamePage::createFilterWidget()
 {
-    auto* widget = ModFilterWidget::create(nullptr, false);
-    m_filterWidget.reset(widget);
-    auto* old = m_ui->splitter->replaceWidget(0, m_filterWidget.get());
+    auto widget = ModFilterWidget::create(nullptr, false);
+    m_filterWidget.swap(widget);
+    auto old = m_ui->splitter->replaceWidget(0, m_filterWidget.get());
     // because we replaced the widget we also need to delete it
     if (old) {
-        old->deleteLater();
+        delete old;
     }
 
     connect(m_ui->filterButton, &QPushButton::clicked, this, [this] { m_filterWidget->setHidden(!m_filterWidget->isHidden()); });
@@ -345,8 +332,8 @@ void FlamePage::createFilterWidget()
     connect(m_filterWidget.get(), &ModFilterWidget::filterChanged, this, &FlamePage::triggerSearch);
     auto [task, response] = FlameAPI::getCategories(ModPlatform::ResourceType::Modpack);
     m_categoriesTask = task;
-    connect(m_categoriesTask.get(), &Task::succeeded, this, [this, response]() {
-        auto categories = FlameAPI::get().loadModCategories(*response);
+    connect(m_categoriesTask.get(), &Task::succeeded, [this, response]() {
+        auto categories = FlameAPI::loadModCategories(*response);
         m_filterWidget->setCategories(categories);
     });
     m_categoriesTask->start();

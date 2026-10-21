@@ -65,9 +65,7 @@ class ProgressDialog : public QDialog {
     int execWithTask(std::unique_ptr<Task>&& task);
     int execWithTask(std::unique_ptr<Task>& task);
 
-    void hideSkipButton();
-
-    void showSkipButton(const QString& label = tr("Abort"));
+    void setSkipButton(bool present, QString label = QString());
 
     Task* getTask();
 

@@ -70,6 +70,8 @@ class FlamePackExportTask : public Task {
     FlamePackExportOptions m_options;
     QDir m_gameRoot;
 
+    FlameAPI api;
+
     QFileInfoList m_files;
     QMap<QString, HashInfo> pendingHashes{};
     QMap<QString, ResolvedFile> resolvedFiles{};

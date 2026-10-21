@@ -44,7 +44,7 @@
 #include "ui/themes/CatPainter.h"
 
 struct InstanceViewRoles {
-    enum { GroupRole = Qt::UserRole };
+    enum { GroupRole = Qt::UserRole, ProgressValueRole, ProgressMaximumRole };
 };
 
 class InstanceView : public QAbstractItemView {
